@@ -71,14 +71,19 @@ async def find_user_by_name(session_id: str, name: str) -> str | None:
     resolve to their own login. GitHub's org-members list only returns
     logins, not display names, so each member needs a follow-up profile fetch
     — expensive for large orgs, but there's no bulk "members with profile"
-    endpoint. Only an exact display name match counts; ambiguous or no
-    matches return None rather than guessing, same policy as
-    jira_client.find_user_by_name.
+    endpoint. An exact display name match counts, or a whole-word match
+    against a multi-word display name (e.g. "Nayab" matching "Nayab
+    Rehmat") — same policy as jira_client.find_user_by_name. Ambiguous or
+    no matches return None rather than guessing.
     """
     name_lower = name.strip().lower()
 
+    def _matches(display_name: str) -> bool:
+        display_name_lower = display_name.strip().lower()
+        return display_name_lower == name_lower or name_lower in display_name_lower.split()
+
     own_profile = await whoami(session_id)
-    if (own_profile.get("name") or "").strip().lower() == name_lower:
+    if _matches(own_profile.get("name") or ""):
         return own_profile["login"]
 
     matches: list[str] = []
@@ -90,7 +95,7 @@ async def find_user_by_name(session_id: str, name: str) -> str | None:
             profile_response = await _request("GET", session_id, f"/users/{member['login']}")
             profile_response.raise_for_status()
             profile = profile_response.json()
-            if (profile.get("name") or "").strip().lower() == name_lower:
+            if _matches(profile.get("name") or ""):
                 matches.append(member["login"])
 
     return matches[0] if len(matches) == 1 else None

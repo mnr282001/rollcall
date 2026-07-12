@@ -18,19 +18,19 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 - [x] Pick stack and commit to it
 - [x] Initialize repo with the target folder structure (see below)
 - [x] Create `.env` for secrets
-- [ ] Add `.env` to `.gitignore` **before writing any API code**
-- [ ] Verify JIRA URL + token work with a single `curl`
+- [x] Add `.env` to `.gitignore` **before writing any API code**
+- [x] Verify JIRA URL + token work with a single `curl`
 - [ ] Verify GitHub token works with a single `curl`
-- [ ] Install dependencies and confirm the project runs (empty entrypoint is fine)
+- [x] Install dependencies and confirm the project runs (empty entrypoint is fine)
 
 ## Phase 1 — JIRA integration, in isolation (Day 1 morning)
 
-- [ ] Authenticate to JIRA (API token / basic auth)
-- [ ] Make one successful API call
-- [ ] Fetch assigned issues for a **hardcoded** username
-- [ ] Extract only needed fields: issue key, summary, status, last updated
-- [ ] Print raw result and sanity-check it
-- [ ] Wrap in a clean function (e.g. `get_jira_issues(username)`)
+- [x] Authenticate to JIRA (API token / basic auth)
+- [x] Make one successful API call
+- [x] Fetch assigned issues for a **hardcoded** username
+- [x] Extract only needed fields: issue key, summary, status, last updated
+- [x] Print raw result and sanity-check it
+- [x] Wrap in a clean function (e.g. `get_jira_issues(username)`)
 
 ## Phase 2 — GitHub integration, in isolation (Day 1 afternoon)
 

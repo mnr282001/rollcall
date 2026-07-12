@@ -41,7 +41,9 @@ async def debug_jira_issues(request: Request, account_id: str = "61e9d1c998cd610
     if not session or not session["jira_access_token"]:
         raise HTTPException(status_code=401, detail="Jira not connected — visit /auth/jira/login first")
 
-    issues = jira_client.get_jira_issues(
-        session["jira_access_token"], session["jira_cloud_id"], account_id
-    )
+    try:
+        issues = jira_client.get_jira_issues(session_id, account_id)
+    except jira_client.JiraAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
     return {"account_id": account_id, "issues": issues}

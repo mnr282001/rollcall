@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+import json
 import os
 import secrets
+import time
 
 import httpx
 from dotenv import load_dotenv
@@ -67,6 +70,21 @@ def refresh_access_token(refresh_token: str) -> tuple[str, str]:
     response.raise_for_status()
     body = response.json()
     return body["access_token"], body["refresh_token"]
+
+
+def is_token_expired(access_token: str, leeway_seconds: int = 30) -> bool:
+    """Decodes the JWT's exp claim locally (no signature check needed — we're only
+    reading our own stored token to decide whether to refresh, not authenticating
+    the caller). Jira's /search/jql silently returns empty results for a stale
+    token instead of 401ing, so we can't rely on a failed request to tell us.
+    """
+    try:
+        payload_b64 = access_token.split(".")[1]
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+        return time.time() >= (payload["exp"] - leeway_seconds)
+    except (IndexError, ValueError, KeyError):
+        return True
 
 
 def get_cloud_id(access_token: str) -> str:

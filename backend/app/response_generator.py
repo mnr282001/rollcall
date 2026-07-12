@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
@@ -40,10 +41,17 @@ def _activity_facts(name: str, activity: dict) -> dict:
         ],
         "has_linked_github": commits is not None,
         "github_commits": None if commits is None else [
-            {"repo": commit["repo"], "message": commit["message"], "sha": commit["sha"]} for commit in commits
+            {"repo": commit["repo"], "message": commit["message"], "sha": commit["sha"], "date": commit["date"]}
+            for commit in commits
         ],
         "github_pull_requests": None if pull_requests is None else [
-            {"repo": pr["repo"], "number": pr["number"], "title": pr["title"]} for pr in pull_requests
+            {
+                "repo": pr["repo"],
+                "number": pr["number"],
+                "title": pr["title"],
+                "updated_at": pr["updated_at"],
+            }
+            for pr in pull_requests
         ],
     }
 
@@ -68,17 +76,23 @@ def _llm_answer(question: str, facts: list[dict], not_found: list[str]) -> str |
                         "asked: if the question is about JIRA specifically, focus on that instead of dumping "
                         "GitHub activity too, and vice versa. If a name appears in `not_found`, say you don't "
                         "know that person. If a person has `has_linked_github: false`, mention they have no "
-                        "linked GitHub account rather than guessing about their code activity. Each JIRA issue "
-                        "has an `updated` timestamp — if the question asks about a specific time frame (e.g. "
-                        "'today', 'this week'), only count issues whose `updated` falls in that window, and say "
-                        "there's no activity in that window if none qualify. Never state that someone did or "
-                        "didn't do something in a time frame you weren't given a timestamp to check. Keep it "
-                        "brief and natural, like a helpful teammate would answer."
+                        "linked GitHub account rather than guessing about their code activity. JIRA issues have "
+                        "an `updated` timestamp (when the ticket was last modified in any way — not necessarily "
+                        "when it was completed), commits have a `date`, and PRs have an `updated_at`. The user "
+                        "message tells you the current date. If the question asks about a specific time frame "
+                        "(e.g. 'today', 'this week'), only count items whose timestamp falls in that window "
+                        "relative to the current date, and say there's no activity in that window if none "
+                        "qualify. Don't claim an issue was 'completed' in that window just because `updated` "
+                        "falls in it and the status happens to be Done — say it was last touched then, unless "
+                        "that's genuinely the same thing you can infer. Never state that someone did or didn't "
+                        "do something in a time frame without checking its timestamp against the current date. "
+                        "Keep it brief and natural, like a helpful teammate would answer."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
+                        f"Current date (UTC): {datetime.now(timezone.utc).date().isoformat()}\n\n"
                         f"Question: {question}\n\n"
                         f"Facts:\n{json.dumps({'people': facts, 'not_found': not_found}, indent=2)}"
                     ),

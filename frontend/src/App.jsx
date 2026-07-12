@@ -24,6 +24,14 @@ function App() {
     }
   }
 
+  async function disconnect(provider) {
+    try {
+      await fetch(`${API_URL}/auth/${provider}/logout`, { method: 'POST', credentials: 'include' })
+    } finally {
+      fetchStatus()
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     if (!question.trim()) return
@@ -85,18 +93,20 @@ function App() {
           label="GitHub"
           connected={status?.github_connected}
           href={`${API_URL}/auth/github/login`}
+          onDisconnect={() => disconnect('github')}
         />
         <ConnectionStatus
           label="Jira"
           connected={status?.jira_connected}
           href={`${API_URL}/auth/jira/login`}
+          onDisconnect={() => disconnect('jira')}
         />
       </div>
     </main>
   )
 }
 
-function ConnectionStatus({ label, connected, href }) {
+function ConnectionStatus({ label, connected, href, onDisconnect }) {
   if (connected === undefined || connected === null) {
     return (
       <span className="connection connection-pending">
@@ -107,9 +117,9 @@ function ConnectionStatus({ label, connected, href }) {
 
   if (connected) {
     return (
-      <span className="connection connection-connected">
-        <span className="connection-dot" /> {label} connected
-      </span>
+      <button type="button" className="connection connection-connected" onClick={onDisconnect}>
+        <span className="connection-dot" /> {label} connected · Disconnect
+      </button>
     )
   }
 

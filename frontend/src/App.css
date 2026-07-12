@@ -65,8 +65,11 @@ button:disabled {
   align-items: center;
   gap: 0.4rem;
   padding: 0.3rem 0.7rem;
+  border: none;
   border-radius: 999px;
   text-decoration: none;
+  font-size: inherit;
+  font-family: inherit;
 }
 
 .connection-dot {
@@ -78,6 +81,11 @@ button:disabled {
 .connection-connected {
   color: #15803d;
   background: #f0fdf4;
+  cursor: pointer;
+}
+
+.connection-connected:hover {
+  background: #dcfce7;
 }
 
 .connection-connected .connection-dot {

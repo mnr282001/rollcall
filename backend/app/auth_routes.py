@@ -69,6 +69,22 @@ async def jira_callback(request: Request, code: str, state: str):
     return response
 
 
+@router.post("/github/logout")
+async def github_logout(request: Request):
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if session_id:
+        db.clear_github_token(session_id)
+    return {"github_connected": False}
+
+
+@router.post("/jira/logout")
+async def jira_logout(request: Request):
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if session_id:
+        db.clear_jira_tokens(session_id)
+    return {"jira_connected": False}
+
+
 @router.get("/me")
 async def me(request: Request):
     session_id = request.cookies.get(SESSION_COOKIE)

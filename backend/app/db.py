@@ -41,6 +41,20 @@ def save_jira_tokens(session_id: str, access_token: str, refresh_token: str, clo
     ).eq("session_id", session_id).execute()
 
 
+def clear_github_token(session_id: str) -> None:
+    _get_client().table("sessions").update({"github_token": None}).eq("session_id", session_id).execute()
+
+
+def clear_jira_tokens(session_id: str) -> None:
+    _get_client().table("sessions").update(
+        {
+            "jira_access_token": None,
+            "jira_refresh_token": None,
+            "jira_cloud_id": None,
+        }
+    ).eq("session_id", session_id).execute()
+
+
 def get_any_session_id() -> str | None:
     """Used only by cli.py, which has no cookie to read a session_id from.
 

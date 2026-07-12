@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -8,6 +8,21 @@ function App() {
   const [answer, setAnswer] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [status, setStatus] = useState(null)
+
+  useEffect(() => {
+    fetchStatus()
+  }, [])
+
+  async function fetchStatus() {
+    try {
+      const response = await fetch(`${API_URL}/auth/me`, { credentials: 'include' })
+      const data = await response.json()
+      setStatus(data)
+    } catch {
+      setStatus({ authenticated: false, github_connected: false, jira_connected: false })
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -65,12 +80,43 @@ function App() {
       {error && <p className="error">{error}</p>}
       {answer && <pre className="answer">{answer}</pre>}
 
-      <p className="login-links">
-        Not logged in? <a href={`${API_URL}/auth/github/login`}>Connect GitHub</a>
-        {' · '}
-        <a href={`${API_URL}/auth/jira/login`}>Connect Jira</a>
-      </p>
+      <div className="connections">
+        <ConnectionStatus
+          label="GitHub"
+          connected={status?.github_connected}
+          href={`${API_URL}/auth/github/login`}
+        />
+        <ConnectionStatus
+          label="Jira"
+          connected={status?.jira_connected}
+          href={`${API_URL}/auth/jira/login`}
+        />
+      </div>
     </main>
+  )
+}
+
+function ConnectionStatus({ label, connected, href }) {
+  if (connected === undefined || connected === null) {
+    return (
+      <span className="connection connection-pending">
+        <span className="connection-dot" /> {label}
+      </span>
+    )
+  }
+
+  if (connected) {
+    return (
+      <span className="connection connection-connected">
+        <span className="connection-dot" /> {label} connected
+      </span>
+    )
+  }
+
+  return (
+    <a className="connection connection-disconnected" href={href}>
+      <span className="connection-dot" /> Connect {label}
+    </a>
   )
 }
 

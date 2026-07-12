@@ -100,3 +100,37 @@ def get_team_member(name: str) -> dict | None:
         _get_client().table("team_members").select("*").eq("name", name.strip().lower()).execute()
     )
     return result.data[0] if result.data else None
+
+
+def add_message(
+    session_id: str,
+    role: str,
+    content: str | None = None,
+    tool_calls: list[dict] | None = None,
+    tool_call_id: str | None = None,
+) -> None:
+    _get_client().table("messages").insert(
+        {
+            "session_id": session_id,
+            "role": role,
+            "content": content,
+            "tool_calls": tool_calls,
+            "tool_call_id": tool_call_id,
+        }
+    ).execute()
+
+
+def get_messages(session_id: str) -> list[dict]:
+    result = (
+        _get_client()
+        .table("messages")
+        .select("*")
+        .eq("session_id", session_id)
+        .order("id")
+        .execute()
+    )
+    return result.data
+
+
+def delete_messages(session_id: str) -> None:
+    _get_client().table("messages").delete().eq("session_id", session_id).execute()

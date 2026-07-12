@@ -1,18 +1,41 @@
 .app {
   max-width: 640px;
-  margin: 3rem auto;
+  margin: 2rem auto;
   padding: 0 1.5rem;
   font-family: system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 4rem);
 }
 
 .hint {
   color: #666;
-  margin-bottom: 1.5rem;
+}
+
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.reset-button {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: white;
+  color: #1a1a1a;
+  cursor: pointer;
+}
+
+.reset-button:hover {
+  background: #f5f5f5;
 }
 
 form {
   display: flex;
   gap: 0.5rem;
+  margin-top: 1rem;
 }
 
 input[type='text'] {
@@ -38,23 +61,44 @@ button:disabled {
   cursor: default;
 }
 
-.answer {
-  margin-top: 1.5rem;
-  padding: 1rem;
-  background: #f5f5f5;
-  border-radius: 8px;
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.message {
+  max-width: 80%;
+  padding: 0.6rem 0.9rem;
+  border-radius: 12px;
   white-space: pre-wrap;
-  font-family: inherit;
   line-height: 1.5;
 }
 
+.message-user {
+  align-self: flex-end;
+  background: #1a1a1a;
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.message-assistant {
+  align-self: flex-start;
+  background: #f5f5f5;
+  color: #1a1a1a;
+  border-bottom-left-radius: 4px;
+}
+
 .error {
-  margin-top: 1.5rem;
+  margin-top: 0.75rem;
   color: #b91c1c;
 }
 
 .connections {
-  margin-top: 2rem;
+  margin-bottom: 1rem;
   display: flex;
   gap: 0.75rem;
   font-size: 0.85rem;

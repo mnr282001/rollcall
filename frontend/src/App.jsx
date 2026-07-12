@@ -1,18 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function App() {
-  const [question, setQuestion] = useState('')
-  const [answer, setAnswer] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [status, setStatus] = useState(null)
+  const messagesEndRef = useRef(null)
 
   useEffect(() => {
     fetchStatus()
+    fetchHistory()
   }, [])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   async function fetchStatus() {
     try {
@@ -24,6 +30,17 @@ function App() {
     }
   }
 
+  async function fetchHistory() {
+    try {
+      const response = await fetch(`${API_URL}/chat/history`, { credentials: 'include' })
+      if (!response.ok) return
+      const data = await response.json()
+      setMessages(data.messages)
+    } catch {
+      // history is best-effort — an empty thread just means starting fresh
+    }
+  }
+
   async function disconnect(provider) {
     try {
       await fetch(`${API_URL}/auth/${provider}/logout`, { method: 'POST', credentials: 'include' })
@@ -32,20 +49,36 @@ function App() {
     }
   }
 
+  async function resetChat() {
+    setError('')
+    try {
+      const response = await fetch(`${API_URL}/chat/history`, { method: 'DELETE', credentials: 'include' })
+      if (!response.ok) {
+        setError(`Could not reset chat (${response.status}).`)
+        return
+      }
+      setMessages([])
+    } catch {
+      setError('Could not reach the backend.')
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!question.trim()) return
+    const message = input.trim()
+    if (!message || sending) return
 
-    setLoading(true)
+    setMessages((prev) => [...prev, { role: 'user', content: message }])
+    setInput('')
+    setSending(true)
     setError('')
-    setAnswer('')
 
     try {
-      const response = await fetch(`${API_URL}/ask`, {
+      const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ message }),
       })
 
       if (response.status === 401) {
@@ -58,35 +91,24 @@ function App() {
       }
 
       const data = await response.json()
-      setAnswer(data.answer)
+      setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }])
     } catch {
       setError('Could not reach the backend.')
     } finally {
-      setLoading(false)
+      setSending(false)
     }
   }
 
   return (
     <main className="app">
-      <h1>Team Activity Monitor</h1>
-      <p className="hint">
-        Try: "What is Nayab working on these days?"
-      </p>
-
-      <form onSubmit={handleSubmit}>
-        <input
-          type="text"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="What is Nayab working on these days?"
-        />
-        <button type="submit" disabled={loading}>
-          {loading ? 'Asking…' : 'Ask'}
-        </button>
-      </form>
-
-      {error && <p className="error">{error}</p>}
-      {answer && <pre className="answer">{answer}</pre>}
+      <div className="header-row">
+        <h1>Rollcall</h1>
+        {messages.length > 0 && (
+          <button type="button" className="reset-button" onClick={resetChat}>
+            Reset chat
+          </button>
+        )}
+      </div>
 
       <div className="connections">
         <ConnectionStatus
@@ -102,8 +124,36 @@ function App() {
           onDisconnect={() => disconnect('jira')}
         />
       </div>
+
+      <div className="chat-messages">
+        {messages.length === 0 && (
+          <p className="hint">Try: "What is Nayab working on these days?"</p>
+        )}
+        {messages.map((message, i) => (
+          <ChatMessage key={i} role={message.role} content={message.content} />
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {error && <p className="error">{error}</p>}
+
+      <form onSubmit={handleSubmit}>
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="What is Nayab working on these days?"
+        />
+        <button type="submit" disabled={sending}>
+          {sending ? 'Sending…' : 'Send'}
+        </button>
+      </form>
     </main>
   )
+}
+
+function ChatMessage({ role, content }) {
+  return <div className={`message message-${role}`}>{content}</div>
 }
 
 function ConnectionStatus({ label, connected, href, onDisconnect }) {

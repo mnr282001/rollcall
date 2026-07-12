@@ -96,11 +96,19 @@ async def jira_logout(request: Request):
 async def me(request: Request):
     session_id = request.cookies.get(SESSION_COOKIE)
     if not session_id:
-        return {"authenticated": False}
+        return {
+            "authenticated": False,
+            "github_connected": False,
+            "jira_connected": False,
+        }
 
     session = db.get_session(session_id)
     if not session:
-        return {"authenticated": False}
+        return {
+            "authenticated": False,
+            "github_connected": False,
+            "jira_connected": False,
+        }
 
     return {
         "authenticated": True,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-import sys
 
 from app import activity, query_parser, response_generator, users
 from app.db import DB_PATH
@@ -29,7 +28,20 @@ async def answer(session_id: str, question: str) -> str:
     return response_generator.generate_response(name, data)
 
 
-if __name__ == "__main__":
-    question = " ".join(sys.argv[1:]) or "What is Nayab working on these days?"
+async def main() -> None:
     session_id = _get_any_session_id()
-    print(asyncio.run(answer(session_id, question)))
+    print("Team Activity Monitor — ask a question, or type 'quit' to exit.")
+    while True:
+        try:
+            question = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if question.lower() in ("quit", "exit"):
+            break
+        if not question:
+            continue
+        print(await answer(session_id, question))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

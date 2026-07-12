@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -166,7 +168,15 @@ function App() {
 }
 
 function ChatMessage({ role, content }) {
-  return <div className={`message message-${role}`}>{content}</div>
+  if (role === 'user') {
+    return <div className={`message message-${role}`}>{content}</div>
+  }
+
+  return (
+    <div className={`message message-${role}`}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  )
 }
 
 function ConnectionStatus({ label, connected, href, onDisconnect }) {

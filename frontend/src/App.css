@@ -74,7 +74,6 @@ button:disabled {
   max-width: 80%;
   padding: 0.6rem 0.9rem;
   border-radius: 12px;
-  white-space: pre-wrap;
   line-height: 1.5;
 }
 
@@ -83,6 +82,7 @@ button:disabled {
   background: #1a1a1a;
   color: white;
   border-bottom-right-radius: 4px;
+  white-space: pre-wrap;
 }
 
 .message-assistant {
@@ -90,6 +90,74 @@ button:disabled {
   background: #f5f5f5;
   color: #1a1a1a;
   border-bottom-left-radius: 4px;
+}
+
+.message-assistant > :first-child {
+  margin-top: 0;
+}
+
+.message-assistant > :last-child {
+  margin-bottom: 0;
+}
+
+.message-assistant p,
+.message-assistant ul,
+.message-assistant ol {
+  margin: 0.5rem 0;
+}
+
+.message-assistant ul,
+.message-assistant ol {
+  padding-left: 1.25rem;
+}
+
+.message-assistant li + li {
+  margin-top: 0.2rem;
+}
+
+.message-assistant code {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.9em;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.message-assistant pre {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.message-assistant pre code {
+  background: none;
+  padding: 0;
+}
+
+.message-assistant a {
+  color: #1a1a1a;
+  text-decoration: underline;
+}
+
+.message-assistant blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+  border-left: 3px solid #d4d4d4;
+  color: #555;
+}
+
+.message-assistant table {
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 0.9em;
+}
+
+.message-assistant th,
+.message-assistant td {
+  border: 1px solid #d4d4d4;
+  padding: 0.3rem 0.5rem;
 }
 
 .error {

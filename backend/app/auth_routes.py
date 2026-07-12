@@ -15,12 +15,19 @@ GITHUB_STATE_COOKIE = "github_oauth_state"
 JIRA_STATE_COOKIE = "jira_oauth_state"
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
 
+# When the frontend and backend live on different domains (e.g. Vercel + Render),
+# the session cookie needs SameSite=None + Secure or browsers drop it silently.
+# Secure cookies require HTTPS, which is only true once we're actually deployed.
+_CROSS_SITE = FRONTEND_URL.startswith("https://")
+COOKIE_SAMESITE = "none" if _CROSS_SITE else "lax"
+COOKIE_SECURE = _CROSS_SITE
+
 
 @router.get("/github/login")
 async def github_login():
     state = oauth_github.new_state()
     redirect = RedirectResponse(oauth_github.get_authorize_url(state))
-    redirect.set_cookie(GITHUB_STATE_COOKIE, state, httponly=True, max_age=600)
+    redirect.set_cookie(GITHUB_STATE_COOKIE, state, httponly=True, max_age=600, samesite=COOKIE_SAMESITE, secure=COOKIE_SECURE)
     return redirect
 
 
@@ -37,7 +44,7 @@ async def github_callback(request: Request, code: str, state: str):
     db.save_github_token(session_id, token)
 
     response = RedirectResponse(FRONTEND_URL)
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, max_age=60 * 60 * 24 * 30)
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, max_age=60 * 60 * 24 * 30, samesite=COOKIE_SAMESITE, secure=COOKIE_SECURE)
     response.delete_cookie(GITHUB_STATE_COOKIE)
     return response
 
@@ -46,7 +53,7 @@ async def github_callback(request: Request, code: str, state: str):
 async def jira_login():
     state = oauth_jira.new_state()
     redirect = RedirectResponse(oauth_jira.get_authorize_url(state))
-    redirect.set_cookie(JIRA_STATE_COOKIE, state, httponly=True, max_age=600)
+    redirect.set_cookie(JIRA_STATE_COOKIE, state, httponly=True, max_age=600, samesite=COOKIE_SAMESITE, secure=COOKIE_SECURE)
     return redirect
 
 
@@ -64,7 +71,7 @@ async def jira_callback(request: Request, code: str, state: str):
     db.save_jira_tokens(session_id, access_token, refresh_token, cloud_id)
 
     response = RedirectResponse(FRONTEND_URL)
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, max_age=60 * 60 * 24 * 30)
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, max_age=60 * 60 * 24 * 30, samesite=COOKIE_SAMESITE, secure=COOKIE_SECURE)
     response.delete_cookie(JIRA_STATE_COOKIE)
     return response
 

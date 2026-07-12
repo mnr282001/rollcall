@@ -1,31 +1,36 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 
-from app import activity, query_parser, response_generator, users
-from app.db import DB_PATH
+from app import activity, db, query_parser, response_generator, users
 
 
 def _get_any_session_id() -> str:
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute("SELECT session_id FROM sessions LIMIT 1").fetchone()
-    if not row:
+    session_id = db.get_any_session_id()
+    if not session_id:
         raise SystemExit("No session found — log in via /auth/github/login and /auth/jira/login first.")
-    return row[0]
+    return session_id
 
 
 async def answer(session_id: str, question: str) -> str:
-    name = query_parser.parse_name(question)
-    if not name:
+    names = query_parser.parse_names(question)
+    if not names:
         return "Sorry, I couldn't figure out who you're asking about."
 
-    user = users.lookup_user(name)
-    if not user:
-        return f"Sorry, I don't know anyone named {name}."
+    resolved_users = list(
+        zip(names, await asyncio.gather(*(users.resolve_user(session_id, name) for name in names)))
+    )
+    not_found = [name for name, user in resolved_users if user is None]
+    found = [(name, user) for name, user in resolved_users if user is not None]
 
-    data = await activity.get_user_activity(session_id, user["jira_account_id"], user["github_username"])
-    return response_generator.generate_response(name, data)
+    activities = await asyncio.gather(
+        *(
+            activity.get_user_activity(session_id, user["jira_account_id"], user["github_username"])
+            for name, user in found
+        )
+    )
+    resolved = list(zip((name for name, _ in found), activities))
+    return response_generator.generate_combined_response(resolved, not_found)
 
 
 async def main() -> None:

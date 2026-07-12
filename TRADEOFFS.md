@@ -68,20 +68,41 @@ fix redundant work. Fixed by threading an optional `repos` param through so the 
 list is fetched once and reused. Real measured latency for one full user-activity
 fetch (9 JIRA issues + 20 commits + repo list): ~2.7s.
 
-## Name → identifier mapping (`users.py`)
+## Name → identifier mapping (`users.py`) — from static dict to dynamic resolution
 
-Per-user OAuth means only one real authenticated identity exists in this build (see
-above). `users.py` maps one real display name to a real JIRA `account_id` + GitHub
-username; every other name a query might mention (John, Sarah, Mike from the
-required test cases) has no entry and deliberately falls through to the
-"user not found" path — reusing that gap as one of the required error-handling test
-cases rather than fabricating fake data for it.
+Started with a static hardcoded dict (one real display name → Jira `account_id` +
+GitHub username), which meant any name not manually pre-registered — even a real,
+active Jira user with a real assigned task — incorrectly reported "I don't know
+anyone named X." That's the wrong failure mode: a real teammate assigned real work
+should never require someone to hand-edit a Python dict first.
 
-**What a multi-user version would need:** each teammate completing their own OAuth
-flow, and a way to resolve "whose stored token do we use to look up teammate X's
-activity" (JIRA/GitHub both allow querying visible-but-not-self users with your own
-token, so one logged-in session can answer questions about teammates — this just
-isn't seeded with more than one real mapping yet).
+**Fix:** `users.resolve_user(session_id, name)` now checks a `team_members` cache
+first, and on a miss, resolves live:
+- **Jira** via `/rest/api/3/users/search`, restricted to active `atlassian`-type
+  accounts, matched by exact display name or (if unambiguous) a whole-word match.
+- **GitHub** by listing the session's own org memberships (`/user/orgs`) and
+  searching those orgs' members by profile display name — a person with no GitHub
+  match still resolves via Jira alone, with an explicit "no linked GitHub account"
+  note rather than a false "no activity."
+
+Whatever resolves gets cached into `team_members` so the next query for the same
+name is instant — `POST /admin/users` still exists for manual overrides (e.g. a
+display-name mismatch between Jira and GitHub).
+
+**Real bug caught while building this:** Jira's `/users/search?query=` is not a
+reliable filter — a query matching nobody returns the *entire user directory*
+instead of an empty list. An early version took "the first candidate" as a
+best-effort guess, which meant literally any unmatched name (including nonsense
+strings) silently resolved to the wrong person. Fixed by requiring an exact or
+unambiguous whole-word display-name match client-side, with no closest-guess
+fallback — an ambiguous name (e.g. two real people sharing a last name) now
+correctly returns "I don't know," rather than confidently showing the wrong
+person's data.
+
+**Real limitation found, not a bug:** GitHub org-scoped resolution only works for
+accounts that belong to at least one org — the test account here has zero org
+memberships (confirmed via GitHub's API directly, not a scope issue), so any name
+without a cached mapping resolves Jira-only until a real org is in play.
 
 ## What we'd do with another week
 

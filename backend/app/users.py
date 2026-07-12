@@ -1,24 +1,25 @@
 from __future__ import annotations
 
-# Display name -> per-provider identifiers. Only one real, OAuth-authenticated
-# identity exists for this build (see checklist.md's architecture pivot note);
-# every other name is deliberately absent so a query for it exercises the
-# "user not found" path (Phase 5) rather than returning fabricated data.
-_USERS = {
-    "nayab": {
-        "jira_account_id": "61e9d1c998cd6100706712a6",
-        "github_username": "mnr282001",
-    },
-    # Genuinely zero-activity real accounts, for exercising the "no recent
-    # activity" path (Phase 5) without fabricating data: a Jira app account
-    # never has assigned issues, and a real GitHub user with no commits in
-    # our visible repos never has any there either.
-    "idle": {
-        "jira_account_id": "557058:f58131cb-b67d-43c7-b30d-6b58d40bd077",
-        "github_username": "torvalds",
-    },
-}
+from app import db, github_client, jira_client
 
 
-def lookup_user(name: str) -> dict | None:
-    return _USERS.get(name.strip().lower())
+async def resolve_user(session_id: str, name: str) -> dict | None:
+    """Resolves a display name to Jira/GitHub identifiers.
+
+    Checks the team_members cache first. On a miss, looks the name up live
+    against the session's real Jira workspace (and, if the session belongs to
+    any GitHub orgs, those orgs' members too), then caches whatever it finds
+    so the next query for the same name is instant. A person with no GitHub
+    match still resolves — they just get Jira-only activity.
+    """
+    row = db.get_team_member(name)
+    if row:
+        return {"jira_account_id": row["jira_account_id"], "github_username": row["github_username"]}
+
+    jira_account_id = await jira_client.find_user_by_name(session_id, name)
+    if not jira_account_id:
+        return None
+
+    github_username = await github_client.find_user_by_name(session_id, name)
+    db.add_team_member(name, jira_account_id, github_username)
+    return {"jira_account_id": jira_account_id, "github_username": github_username}

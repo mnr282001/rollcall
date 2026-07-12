@@ -84,6 +84,31 @@ async def fetch_assigned_issues_raw(session_id: str, account_id: str) -> dict:
     return response.json()
 
 
+async def find_user_by_name(session_id: str, name: str) -> str | None:
+    """Searches real, active Jira workspace members by display name.
+
+    Jira's /users/search `query` param is not a reliable filter — an
+    unmatched query can return the entire user directory rather than an empty
+    list, so matching against `displayName` has to happen client-side. Only
+    an exact or whole-word match counts; there's no "closest guess" fallback,
+    since guessing wrong here means confidently showing someone the wrong
+    person's data.
+    """
+    response = await _request("GET", session_id, "/rest/api/3/users/search", params={"query": name})
+    response.raise_for_status()
+    candidates = [user for user in response.json() if user.get("accountType") == "atlassian" and user.get("active")]
+
+    name_lower = name.strip().lower()
+    exact = [user for user in candidates if user.get("displayName", "").lower() == name_lower]
+    if exact:
+        return exact[0]["accountId"]
+
+    word_match = [
+        user for user in candidates if name_lower in user.get("displayName", "").lower().split()
+    ]
+    return word_match[0]["accountId"] if len(word_match) == 1 else None
+
+
 async def get_jira_issues(session_id: str, account_id: str) -> list[dict]:
     """Assigned issues for account_id, trimmed to the fields we need.
 

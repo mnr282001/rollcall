@@ -30,6 +30,11 @@ def generate_response(name: str, activity: dict) -> str:
     commits = activity["github_commits"]
     pull_requests = activity["github_pull_requests"]
 
+    if commits is None and pull_requests is None:
+        if not issues:
+            return f"{name} doesn't have any recent JIRA activity, and has no linked GitHub account."
+        return f"Here's what {name} has been working on:\n\nJIRA: {_format_issues(issues)}\n\n(No linked GitHub account.)"
+
     if not issues and not commits and not pull_requests:
         return f"{name} doesn't have any recent JIRA or GitHub activity."
 
@@ -39,3 +44,16 @@ def generate_response(name: str, activity: dict) -> str:
         f"GitHub commits: {_format_commits(commits)}\n\n"
         f"GitHub PRs: {_format_pull_requests(pull_requests)}"
     )
+
+
+def generate_combined_response(resolved: list[tuple[str, dict]], not_found: list[str]) -> str:
+    """Combines per-person answers for a multi-name query into one response."""
+    if not resolved and not not_found:
+        return "Sorry, I couldn't figure out who you're asking about."
+
+    sections = [generate_response(name, data) for name, data in resolved]
+    if not_found:
+        names = ", ".join(not_found)
+        sections.append(f"I don't know anyone named {names}.")
+
+    return "\n\n---\n\n".join(sections)

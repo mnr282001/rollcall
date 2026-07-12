@@ -53,6 +53,41 @@ async def whoami(session_id: str) -> dict:
     return response.json()
 
 
+async def get_user_orgs(session_id: str) -> list[str]:
+    """Orgs the authenticated session's own GitHub account belongs to."""
+    response = await _request("GET", session_id, "/user/orgs", params={"per_page": 100})
+    response.raise_for_status()
+    return [org["login"] for org in response.json()]
+
+
+_MEMBERS_LIMIT = 100
+
+
+async def find_user_by_name(session_id: str, name: str) -> str | None:
+    """Searches members of the session's own GitHub orgs by display name.
+
+    GitHub's org-members list only returns logins, not display names, so each
+    member needs a follow-up profile fetch — expensive for large orgs, but
+    there's no bulk "members with profile" endpoint. Only an exact display
+    name match counts; ambiguous or no matches return None rather than
+    guessing, same policy as jira_client.find_user_by_name.
+    """
+    name_lower = name.strip().lower()
+    matches: list[str] = []
+
+    for org in await get_user_orgs(session_id):
+        response = await _request("GET", session_id, f"/orgs/{org}/members", params={"per_page": _MEMBERS_LIMIT})
+        response.raise_for_status()
+        for member in response.json():
+            profile_response = await _request("GET", session_id, f"/users/{member['login']}")
+            profile_response.raise_for_status()
+            profile = profile_response.json()
+            if (profile.get("name") or "").strip().lower() == name_lower:
+                matches.append(member["login"])
+
+    return matches[0] if len(matches) == 1 else None
+
+
 _RECENT_REPOS_LIMIT = 5
 
 

@@ -77,7 +77,7 @@ async def fetch_assigned_issues_raw(session_id: str, account_id: str) -> dict:
         "/rest/api/3/search/jql",
         params={
             "jql": f"assignee={account_id}",
-            "fields": "summary,status,updated",
+            "fields": "summary,status,updated,priority,timeoriginalestimate",
         },
     )
     response.raise_for_status()
@@ -123,6 +123,8 @@ async def get_jira_issues(session_id: str, account_id: str) -> list[dict]:
             "summary": issue["fields"]["summary"],
             "status": issue["fields"]["status"]["name"],
             "updated": issue["fields"]["updated"],
+            "priority": (issue["fields"].get("priority") or {}).get("name"),
+            "time_estimate_seconds": issue["fields"].get("timeoriginalestimate"),
         }
         for issue in raw["issues"]
     ]

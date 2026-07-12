@@ -24,6 +24,10 @@ def _get_client() -> OpenAI | None:
     return _client
 
 
+def _seconds_to_hours(seconds: int | None) -> float | None:
+    return None if seconds is None else round(seconds / 3600, 1)
+
+
 def _activity_facts(name: str, activity: dict) -> dict:
     """Structured, LLM-safe summary of one person's activity — no free text for the model to embellish."""
     commits = activity["github_commits"]
@@ -36,6 +40,8 @@ def _activity_facts(name: str, activity: dict) -> dict:
                 "status": issue["status"],
                 "summary": issue["summary"],
                 "updated": issue["updated"],
+                "priority": issue.get("priority"),
+                "estimate_hours": _seconds_to_hours(issue.get("time_estimate_seconds")),
             }
             for issue in activity["jira_issues"]
         ],
@@ -78,7 +84,10 @@ def _llm_answer(question: str, facts: list[dict], not_found: list[str]) -> str |
                         "know that person. If a person has `has_linked_github: false`, mention they have no "
                         "linked GitHub account rather than guessing about their code activity. JIRA issues have "
                         "an `updated` timestamp (when the ticket was last modified in any way — not necessarily "
-                        "when it was completed), commits have a `date`, and PRs have an `updated_at`. The user "
+                        "when it was completed), a `priority` (may be null if unset), and an `estimate_hours` "
+                        "(original time estimate in hours, may be null if not set). Mention priority or estimate "
+                        "when the question is about workload, urgency, or how long something will take, but don't "
+                        "force them into every answer. Commits have a `date`, and PRs have an `updated_at`. The user "
                         "message tells you the current date. If the question asks about a specific time frame "
                         "(e.g. 'today', 'this week'), only count items whose timestamp falls in that window "
                         "relative to the current date, and say there's no activity in that window if none "
@@ -104,10 +113,20 @@ def _llm_answer(question: str, facts: list[dict], not_found: list[str]) -> str |
         return None
 
 
+def _format_issue_line(issue: dict) -> str:
+    extras = []
+    if issue.get("priority"):
+        extras.append(issue["priority"])
+    if issue.get("time_estimate_seconds") is not None:
+        extras.append(f"{_seconds_to_hours(issue['time_estimate_seconds'])}h est.")
+    suffix = f" [{', '.join(extras)}]" if extras else ""
+    return f"  - {issue['key']} ({issue['status']}): {issue['summary']}{suffix}"
+
+
 def _format_issues(issues: list[dict]) -> str:
     if not issues:
         return "no open JIRA issues"
-    lines = [f"  - {issue['key']} ({issue['status']}): {issue['summary']}" for issue in issues[:5]]
+    lines = [_format_issue_line(issue) for issue in issues[:5]]
     more = f"\n  ...and {len(issues) - 5} more" if len(issues) > 5 else ""
     return f"{len(issues)} JIRA issue(s):\n" + "\n".join(lines) + more
 

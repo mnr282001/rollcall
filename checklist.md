@@ -20,22 +20,32 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 - [x] Create `.env` for secrets
 - [x] Add `.env` to `.gitignore` **before writing any API code**
 - [x] Verify JIRA URL + token work with a single `curl`
-- [ ] Verify GitHub token works with a single `curl`
+- [ ] ~~Verify GitHub token works with a single `curl`~~ — superseded, see auth pivot note below
 - [x] Install dependencies and confirm the project runs (empty entrypoint is fine)
+
+> **Architecture pivot (post-Phase-1):** mid-build we upgraded from a single shared
+> service-account credential to **real per-user OAuth** for both providers, since a
+> real FDE-style tool needs each user authenticating with their own Jira/GitHub
+> identity, not one shared token. This is a bigger scope item than the original
+> checklist assumed — see `backend/app/oauth_jira.py`, `backend/app/oauth_github.py`,
+> `backend/app/auth_routes.py`, and `backend/app/db.py` (SQLite session store).
+> Phase 2's "personal access token" line is now stale; GitHub auth is OAuth too.
 
 ## Phase 1 — JIRA integration, in isolation (Day 1 morning)
 
-- [x] Authenticate to JIRA (API token / basic auth)
+- [x] Authenticate to JIRA (~~API token / basic auth~~ → **OAuth 2.0 3LO**, per-user)
 - [x] Make one successful API call
-- [x] Fetch assigned issues for a **hardcoded** username
+- [x] Fetch assigned issues for a **hardcoded** username (now: hardcoded `account_id`, real value tested end-to-end)
 - [x] Extract only needed fields: issue key, summary, status, last updated
 - [x] Print raw result and sanity-check it
-- [x] Wrap in a clean function (e.g. `get_jira_issues(username)`)
+- [x] Wrap in a clean function (`get_jira_issues(session_id, account_id)`)
+- [x] *(added, not originally listed)* OAuth login/callback routes, SQLite session store, CSRF `state` cookie
+- [x] *(added, not originally listed)* Automatic refresh-token handling — proactively checks the JWT `exp` claim before each call, since Jira's search endpoint silently returns empty results for a stale token instead of `401`ing
 
 ## Phase 2 — GitHub integration, in isolation (Day 1 afternoon)
 
-- [ ] Authenticate to GitHub (personal access token)
-- [ ] Make one successful API call
+- [x] Authenticate to GitHub (~~personal access token~~ → **OAuth App**, per-user) — login/callback already built in `backend/app/oauth_github.py` / `auth_routes.py`, confirmed working live
+- [ ] Make one successful API call fetching real user data (beyond the OAuth token exchange itself)
 - [ ] Fetch recent commits for a hardcoded username
 - [ ] Fetch open pull requests
 - [ ] Fetch recently contributed-to repositories
@@ -154,6 +164,7 @@ code. The demo has explicit slots for "technical challenges" and "technical deci
 them by being able to crisply justify each call and say when you'd choose differently. Jot a
 line for each as you go:
 
+- [ ] **Shared token vs. per-user OAuth** — pivoted from one service-account credential to real Jira 3LO + GitHub OAuth App per-user auth, since an FDE tool needs to represent each user's own identity; cost real time (external app registration, SQLite session store, a Jira scope propagation quirk, proactive JWT-expiry checking since Jira's search endpoint silently returns empty results instead of 401ing on a stale token) — worth it for correctness but a good "technical challenge" story
 - [ ] **Templates vs. LLM** — why you chose it, and when you'd flip
 - [ ] **App Runner vs. Lambda** — chose App Runner to avoid API Gateway/IAM plumbing eating the sprint; would move to Lambda for scale-to-zero cost or an existing serverless footprint
 - [ ] **Concurrent vs. sequential fetches** — why (latency, and it's a listed bonus)

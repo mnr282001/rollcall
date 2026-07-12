@@ -182,6 +182,8 @@ async def get_open_pull_requests(
                     "number": pr["number"],
                     "title": pr["title"],
                     "updated_at": pr["updated_at"],
+                    "draft": pr["draft"],
+                    "requested_reviewers": [reviewer["login"] for reviewer in pr["requested_reviewers"]],
                 }
             )
     return pull_requests

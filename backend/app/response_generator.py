@@ -42,6 +42,8 @@ def _activity_facts(name: str, activity: dict) -> dict:
                 "updated": issue["updated"],
                 "priority": issue.get("priority"),
                 "estimate_hours": _seconds_to_hours(issue.get("time_estimate_seconds")),
+                "due_date": issue.get("due_date"),
+                "issue_type": issue.get("issue_type"),
             }
             for issue in activity["jira_issues"]
         ],
@@ -56,6 +58,8 @@ def _activity_facts(name: str, activity: dict) -> dict:
                 "number": pr["number"],
                 "title": pr["title"],
                 "updated_at": pr["updated_at"],
+                "draft": pr.get("draft"),
+                "requested_reviewers": pr.get("requested_reviewers"),
             }
             for pr in pull_requests
         ],
@@ -84,10 +88,14 @@ def _llm_answer(question: str, facts: list[dict], not_found: list[str]) -> str |
                         "know that person. If a person has `has_linked_github: false`, mention they have no "
                         "linked GitHub account rather than guessing about their code activity. JIRA issues have "
                         "an `updated` timestamp (when the ticket was last modified in any way — not necessarily "
-                        "when it was completed), a `priority` (may be null if unset), and an `estimate_hours` "
-                        "(original time estimate in hours, may be null if not set). Mention priority or estimate "
-                        "when the question is about workload, urgency, or how long something will take, but don't "
-                        "force them into every answer. Commits have a `date`, and PRs have an `updated_at`. The user "
+                        "when it was completed), a `priority` (may be null if unset), an `estimate_hours` "
+                        "(original time estimate in hours, may be null if not set), a `due_date` (may be null), "
+                        "and an `issue_type` (e.g. Bug, Story, Task). Mention priority, estimate, or due date "
+                        "when the question is about workload, urgency, or deadlines — call out anything overdue "
+                        "(due_date before the current date and not Done) — but don't force them into every answer. "
+                        "Commits have a `date`. PRs have an `updated_at`, a `draft` flag (a draft PR isn't ready "
+                        "for review or merge — say so if it's relevant), and `requested_reviewers` (who still "
+                        "needs to review it, may be empty). The user "
                         "message tells you the current date. If the question asks about a specific time frame "
                         "(e.g. 'today', 'this week'), only count items whose timestamp falls in that window "
                         "relative to the current date, and say there's no activity in that window if none "
@@ -115,10 +123,14 @@ def _llm_answer(question: str, facts: list[dict], not_found: list[str]) -> str |
 
 def _format_issue_line(issue: dict) -> str:
     extras = []
+    if issue.get("issue_type"):
+        extras.append(issue["issue_type"])
     if issue.get("priority"):
         extras.append(issue["priority"])
     if issue.get("time_estimate_seconds") is not None:
         extras.append(f"{_seconds_to_hours(issue['time_estimate_seconds'])}h est.")
+    if issue.get("due_date"):
+        extras.append(f"due {issue['due_date']}")
     suffix = f" [{', '.join(extras)}]" if extras else ""
     return f"  - {issue['key']} ({issue['status']}): {issue['summary']}{suffix}"
 
@@ -139,10 +151,21 @@ def _format_commits(commits: list[dict]) -> str:
     return f"{len(commits)} recent commit(s):\n" + "\n".join(lines) + more
 
 
+def _format_pull_request_line(pr: dict) -> str:
+    extras = []
+    if pr.get("draft"):
+        extras.append("draft")
+    reviewers = pr.get("requested_reviewers")
+    if reviewers:
+        extras.append(f"awaiting review from {', '.join(reviewers)}")
+    suffix = f" [{', '.join(extras)}]" if extras else ""
+    return f"  - [{pr['repo']}] #{pr['number']}: {pr['title']}{suffix}"
+
+
 def _format_pull_requests(pull_requests: list[dict]) -> str:
     if not pull_requests:
         return "no open pull requests"
-    lines = [f"  - [{pr['repo']}] #{pr['number']}: {pr['title']}" for pr in pull_requests]
+    lines = [_format_pull_request_line(pr) for pr in pull_requests]
     return f"{len(pull_requests)} open pull request(s):\n" + "\n".join(lines)
 
 

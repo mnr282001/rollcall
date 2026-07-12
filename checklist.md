@@ -71,9 +71,9 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 
 ## Phase 5 — Error handling
 
-- [ ] Handle **user not found** gracefully
-- [ ] Handle **user with no recent activity** gracefully
-- [ ] Handle API/network failures without crashing
+- [x] Handle **user not found** gracefully
+- [x] Handle **user with no recent activity** gracefully
+- [x] Handle API/network failures without crashing
 
 ## Phase 6 — Polish & demo prep (end of Day 2)
 

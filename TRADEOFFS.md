@@ -104,6 +104,34 @@ accounts that belong to at least one org — the test account here has zero org
 memberships (confirmed via GitHub's API directly, not a scope issue), so any name
 without a cached mapping resolves Jira-only until a real org is in play.
 
+## `team_members` cache TTL
+
+The `team_members` cache had no expiry — once a name resolved, that Jira
+`account_id`/GitHub username mapping was permanent, so a display-name change,
+account deactivation, or someone else being renamed to match would silently go
+stale forever with no way to notice.
+
+**Options considered:**
+- **No TTL, manual invalidation only** (via `POST /admin/users`) — simplest, but
+  relies on someone remembering to fix a stale mapping after the fact.
+- **24-hour TTL** (chosen) — a `resolved_at` timestamp column; `resolve_user()`
+  treats a cached row older than 24h as stale and re-resolves live, refreshing the
+  timestamp on success. If the live re-resolution fails (Jira/GitHub unreachable),
+  it falls back to serving the stale cached row rather than surfacing an error or
+  refusing to answer — a day-old mapping is still more useful than an
+  outage-triggered "I don't know this person."
+- **Re-validate on every query, no cache** — always fresh, but reintroduces the
+  expensive part of GitHub resolution (list org members, then one profile fetch
+  per member) on every single question, which doesn't scale with org size or
+  query volume.
+
+**Why 24h:** team/display-name changes are infrequent enough that daily freshness
+catches real drift quickly without meaningfully increasing API load. Verified all
+three paths against real data: a fresh cache hit skips live resolution entirely: a
+stale hit re-resolves and refreshes `resolved_at`; and a stale hit under a
+simulated Jira outage still returns the last-known-good mapping instead of
+failing the query.
+
 ## What we'd do with another week
 
 - Real multi-user mapping (see above) instead of a single hardcoded identity

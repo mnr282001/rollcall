@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
@@ -68,12 +69,13 @@ def get_session(session_id: str) -> dict | None:
     return result.data[0] if result.data else None
 
 
-def add_team_member(name: str, jira_account_id: str, github_username: str) -> None:
+def add_team_member(name: str, jira_account_id: str, github_username: str | None) -> None:
     _get_client().table("team_members").upsert(
         {
             "name": name.strip().lower(),
             "jira_account_id": jira_account_id,
             "github_username": github_username,
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
         },
         on_conflict="name",
     ).execute()

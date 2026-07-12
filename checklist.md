@@ -65,9 +65,9 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 
 - [x] Build CLI loop: read question → print answer (proves the core works)
 - [x] Expose a FastAPI endpoint (e.g. `POST /ask`) returning the answer as JSON
-- [ ] Build React frontend: input box + answer area (Vite is fine; keep it minimal)
-- [ ] Wire frontend → backend endpoint
-- [ ] Configure CORS on FastAPI to allow the frontend origin
+- [x] Build React frontend: input box + answer area (Vite is fine; keep it minimal)
+- [x] Wire frontend → backend endpoint
+- [x] Configure CORS on FastAPI to allow the frontend origin
 
 ## Phase 5 — Error handling
 

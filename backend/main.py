@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import chat, db
@@ -54,10 +55,6 @@ class ChatRequest(BaseModel):
     message: str
 
 
-class ChatResponse(BaseModel):
-    answer: str
-
-
 def _require_session(request: Request) -> str:
     session_id = request.cookies.get(SESSION_COOKIE)
     if not session_id or not db.get_session(session_id):
@@ -65,14 +62,15 @@ def _require_session(request: Request) -> str:
     return session_id
 
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat")
 async def chat_endpoint(request: Request, body: ChatRequest):
     session_id = _require_session(request)
     try:
-        answer = await chat.handle_message(session_id, body.message)
+        chat.ensure_configured()
     except chat.NotConfiguredError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return ChatResponse(answer=answer)
+
+    return StreamingResponse(chat.stream_message(session_id, body.message), media_type="text/plain")
 
 
 @app.get("/chat/history")

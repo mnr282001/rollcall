@@ -85,13 +85,26 @@ function App() {
         setError('Not logged in. Log in with Jira and GitHub first, then try again.')
         return
       }
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         setError(`Request failed (${response.status}).`)
         return
       }
 
-      const data = await response.json()
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }])
+      setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        setMessages((prev) => {
+          const next = [...prev]
+          const last = next[next.length - 1]
+          next[next.length - 1] = { ...last, content: last.content + chunk }
+          return next
+        })
+      }
     } catch {
       setError('Could not reach the backend.')
     } finally {

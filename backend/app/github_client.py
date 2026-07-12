@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 
 from app import db
@@ -142,8 +144,8 @@ async def get_recent_commits(
     """
     if repos is None:
         repos = await get_recent_repos(session_id, limit=repo_limit)
-    commits: list[dict] = []
-    for repo in repos:
+
+    async def _commits_for_repo(repo: dict) -> list[dict]:
         response = await _request(
             "GET",
             session_id,
@@ -152,18 +154,20 @@ async def get_recent_commits(
         )
         if response.status_code == 409:
             # Empty repository (no commits yet) — GitHub returns 409, not an empty list.
-            continue
+            return []
         response.raise_for_status()
-        for commit in response.json():
-            commits.append(
-                {
-                    "repo": repo["full_name"],
-                    "sha": commit["sha"][:7],
-                    "message": commit["commit"]["message"].splitlines()[0],
-                    "date": commit["commit"]["author"]["date"],
-                }
-            )
-    return commits
+        return [
+            {
+                "repo": repo["full_name"],
+                "sha": commit["sha"][:7],
+                "message": commit["commit"]["message"].splitlines()[0],
+                "date": commit["commit"]["author"]["date"],
+            }
+            for commit in response.json()
+        ]
+
+    results = await asyncio.gather(*(_commits_for_repo(repo) for repo in repos))
+    return [commit for repo_commits in results for commit in repo_commits]
 
 
 async def get_open_pull_requests(
@@ -177,8 +181,8 @@ async def get_open_pull_requests(
     """
     if repos is None:
         repos = await get_recent_repos(session_id, limit=repo_limit)
-    pull_requests: list[dict] = []
-    for repo in repos:
+
+    async def _prs_for_repo(repo: dict) -> list[dict]:
         response = await _request(
             "GET",
             session_id,
@@ -186,17 +190,18 @@ async def get_open_pull_requests(
             params={"state": "open", "per_page": 20},
         )
         response.raise_for_status()
-        for pr in response.json():
-            if pr["user"]["login"] != username:
-                continue
-            pull_requests.append(
-                {
-                    "repo": repo["full_name"],
-                    "number": pr["number"],
-                    "title": pr["title"],
-                    "updated_at": pr["updated_at"],
-                    "draft": pr["draft"],
-                    "requested_reviewers": [reviewer["login"] for reviewer in pr["requested_reviewers"]],
-                }
-            )
-    return pull_requests
+        return [
+            {
+                "repo": repo["full_name"],
+                "number": pr["number"],
+                "title": pr["title"],
+                "updated_at": pr["updated_at"],
+                "draft": pr["draft"],
+                "requested_reviewers": [reviewer["login"] for reviewer in pr["requested_reviewers"]],
+            }
+            for pr in response.json()
+            if pr["user"]["login"] == username
+        ]
+
+    results = await asyncio.gather(*(_prs_for_repo(repo) for repo in repos))
+    return [pr for repo_prs in results for pr in repo_prs]

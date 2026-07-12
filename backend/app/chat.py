@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from openai import OpenAI, OpenAIError
+from openai import AsyncOpenAI, OpenAIError
 
 from app import activity, db, github_client, jira_client, users
 
@@ -14,22 +15,27 @@ load_dotenv()
 
 _OPENAI_MODEL = "gpt-4o-mini"
 _MAX_HOPS = 4
-_client: OpenAI | None = None
+_client: AsyncOpenAI | None = None
 
 
 class NotConfiguredError(Exception):
     """Raised when OPENAI_API_KEY is missing — chat is unusable without it."""
 
 
-def _get_client() -> OpenAI:
+def _get_client() -> AsyncOpenAI:
     global _client
     if _client is not None:
         return _client
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise NotConfiguredError("OPENAI_API_KEY is not configured")
-    _client = OpenAI(api_key=api_key)
+    _client = AsyncOpenAI(api_key=api_key)
     return _client
+
+
+def ensure_configured() -> None:
+    """Raises NotConfiguredError up front, before a streaming response's headers are sent."""
+    _get_client()
 
 
 _TOOL = {
@@ -187,12 +193,14 @@ def _row_to_openai_message(row: dict) -> dict:
 _FALLBACK_ANSWER = "Sorry, I'm having trouble putting together an answer right now — try rephrasing?"
 
 
-async def handle_message(session_id: str, user_message: str) -> str:
-    """Answers a chat message, using the full session history for context.
+async def stream_message(session_id: str, user_message: str) -> AsyncIterator[str]:
+    """Answers a chat message, streaming the reply text as it's generated.
 
     The LLM decides which people (if any) to look up via the get_activity_for_people
     tool, resolving pronouns/follow-ups from prior turns itself. Every turn (user,
-    assistant, and tool) is persisted so the next call picks up the full thread.
+    assistant, and tool) is persisted so the next call picks up the full thread. Only
+    the final hop (no tool call) produces content, so that's the only one streamed to
+    the caller — earlier hops that just decide to call the tool emit nothing.
     """
     client = _get_client()
     db.add_message(session_id, "user", content=user_message)
@@ -201,34 +209,58 @@ async def handle_message(session_id: str, user_message: str) -> str:
 
     try:
         for _ in range(_MAX_HOPS):
-            completion = await asyncio.to_thread(
-                client.chat.completions.create,
+            stream = await client.chat.completions.create(
                 model=_OPENAI_MODEL,
                 temperature=0.3,
                 messages=messages,
                 tools=[_TOOL],
                 tool_choice="auto",
+                stream=True,
             )
-            message = completion.choices[0].message
 
-            if not message.tool_calls:
-                answer = message.content or _FALLBACK_ANSWER
+            content_parts: list[str] = []
+            tool_calls_acc: dict[int, dict] = {}
+
+            async for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    content_parts.append(delta.content)
+                    yield delta.content
+                for tool_call_delta in delta.tool_calls or []:
+                    entry = tool_calls_acc.setdefault(
+                        tool_call_delta.index,
+                        {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+                    )
+                    if tool_call_delta.id:
+                        entry["id"] = tool_call_delta.id
+                    if tool_call_delta.function and tool_call_delta.function.name:
+                        entry["function"]["name"] += tool_call_delta.function.name
+                    if tool_call_delta.function and tool_call_delta.function.arguments:
+                        entry["function"]["arguments"] += tool_call_delta.function.arguments
+
+            content = "".join(content_parts) or None
+
+            if not tool_calls_acc:
+                answer = content or _FALLBACK_ANSWER
+                if not content:
+                    yield answer
                 db.add_message(session_id, "assistant", content=answer)
-                return answer
+                return
 
-            tool_calls_payload = [tool_call.model_dump() for tool_call in message.tool_calls]
-            db.add_message(session_id, "assistant", content=message.content, tool_calls=tool_calls_payload)
-            messages.append({"role": "assistant", "content": message.content, "tool_calls": tool_calls_payload})
+            tool_calls_payload = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
+            db.add_message(session_id, "assistant", content=content, tool_calls=tool_calls_payload)
+            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls_payload})
 
-            for tool_call in message.tool_calls:
-                args = json.loads(tool_call.function.arguments)
+            for tool_call in tool_calls_payload:
+                args = json.loads(tool_call["function"]["arguments"])
                 result = await _execute_get_activity(session_id, args.get("names", []))
-                content = json.dumps(result)
-                db.add_message(session_id, "tool", content=content, tool_call_id=tool_call.id)
-                messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": content})
+                result_content = json.dumps(result)
+                db.add_message(session_id, "tool", content=result_content, tool_call_id=tool_call["id"])
+                messages.append({"role": "tool", "tool_call_id": tool_call["id"], "content": result_content})
     except OpenAIError:
         db.add_message(session_id, "assistant", content=_FALLBACK_ANSWER)
-        return _FALLBACK_ANSWER
+        yield _FALLBACK_ANSWER
+        return
 
     db.add_message(session_id, "assistant", content=_FALLBACK_ANSWER)
-    return _FALLBACK_ANSWER
+    yield _FALLBACK_ANSWER

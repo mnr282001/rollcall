@@ -132,6 +132,48 @@ stale hit re-resolves and refreshes `resolved_at`; and a stale hit under a
 simulated Jira outage still returns the last-known-good mapping instead of
 failing the query.
 
+## Chat send latency: streaming + parallel GitHub fetches
+
+Clicking "send" felt slow because the UI showed nothing until the *entire*
+backend round trip — including the full non-streamed OpenAI completion —
+finished, and `github_client.py` fetched each of the (up to 5) recently-pushed
+repos' commits/PRs one at a time instead of concurrently.
+
+**Fix 1 — stream the OpenAI response end-to-end.** `chat.py`'s
+`handle_message` became `stream_message`, using `AsyncOpenAI` with
+`stream=True` and yielding content chunks as they're generated. `POST /chat`
+now returns a `StreamingResponse` instead of a buffered JSON body, and the
+frontend reads it incrementally via `response.body.getReader()`, appending
+each chunk to the assistant bubble as it arrives instead of waiting for
+`response.json()`.
+
+**Cost:** config errors (missing `OPENAI_API_KEY`) must be checked *before*
+the stream starts (`chat.ensure_configured()`), since HTTP headers are
+already committed once streaming begins — can't cleanly turn a mid-stream
+failure into a 500 anymore, only fall back to error text inline. The
+tool-calling hop (deciding *whether* to look up a teammate) still streams
+nothing — only the final answer-generating hop produces content — so a
+question that triggers a lookup still has a silent gap before anything
+appears. Showing a "checking Jira/GitHub…" indicator during that hop was
+considered but skipped as UI complexity beyond this pass.
+
+**Fix 2 — parallelize per-repo GitHub calls.** `get_recent_commits` and
+`get_open_pull_requests` looped over repos sequentially (`for repo in repos:
+await ...`); both now fan out with `asyncio.gather`.
+
+**Cost:** more concurrent outbound requests to GitHub per chat turn — fine
+at `_RECENT_REPOS_LIMIT = 5`, but would need a semaphore if that limit grows
+a lot.
+
+**Deliberately not fixed this pass:**
+- The two sequential LLM round trips inherent to OpenAI function-calling
+  (decide-to-call-tool, then compose-answer) — streaming softens this but
+  doesn't remove the first call's latency.
+- Serial, blocking `db.add_message` calls per turn (`db.py` is a sync
+  Supabase client called directly from async code, not even via
+  `asyncio.to_thread`) — a smaller contributor than the two fixes above.
+- No caching of repo/commit/PR data across turns in the same session.
+
 ## What we'd do with another week
 
 - Real multi-user mapping (see above) instead of a single hardcoded identity

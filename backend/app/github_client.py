@@ -20,24 +20,25 @@ class GitHubConnectionError(GitHubError):
     """Raised on network failures/timeouts talking to GitHub."""
 
 
-def _do_request(method: str, token: str, path: str, **kwargs) -> httpx.Response:
+async def _do_request(method: str, token: str, path: str, **kwargs) -> httpx.Response:
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     try:
-        return httpx.request(method, f"{_BASE_URL}{path}", headers=headers, timeout=_TIMEOUT, **kwargs)
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            return await client.request(method, f"{_BASE_URL}{path}", headers=headers, **kwargs)
     except httpx.RequestError as exc:
         raise GitHubConnectionError(f"Could not reach GitHub: {exc}") from exc
 
 
-def _request(method: str, session_id: str, path: str, **kwargs) -> httpx.Response:
+async def _request(method: str, session_id: str, path: str, **kwargs) -> httpx.Response:
     session = db.get_session(session_id)
     if not session or not session["github_token"]:
         raise GitHubAuthError("No GitHub session — visit /auth/github/login first.")
 
-    response = _do_request(method, session["github_token"], path, **kwargs)
+    response = await _do_request(method, session["github_token"], path, **kwargs)
 
     if response.status_code in (401, 403):
         raise GitHubAuthError("GitHub rejected the access token.")
@@ -45,9 +46,9 @@ def _request(method: str, session_id: str, path: str, **kwargs) -> httpx.Respons
     return response
 
 
-def whoami(session_id: str) -> dict:
+async def whoami(session_id: str) -> dict:
     """Sanity check: confirms the session's OAuth token works against a real GitHub endpoint."""
-    response = _request("GET", session_id, "/user")
+    response = await _request("GET", session_id, "/user")
     response.raise_for_status()
     return response.json()
 
@@ -55,14 +56,14 @@ def whoami(session_id: str) -> dict:
 _RECENT_REPOS_LIMIT = 5
 
 
-def get_recent_repos(session_id: str, limit: int = _RECENT_REPOS_LIMIT) -> list[dict]:
+async def get_recent_repos(session_id: str, limit: int = _RECENT_REPOS_LIMIT) -> list[dict]:
     """Repos the authenticated user has recently pushed to, most recent first.
 
     GitHub has no single endpoint for "everything a user worked on" — /user/repos
     sorted by push time is the practical stand-in, and doubles as the repo set we
     pull commits/PRs from.
     """
-    response = _request(
+    response = await _request(
         "GET",
         session_id,
         "/user/repos",
@@ -82,15 +83,20 @@ def get_recent_repos(session_id: str, limit: int = _RECENT_REPOS_LIMIT) -> list[
 _COMMITS_PER_REPO = 5
 
 
-def get_recent_commits(session_id: str, username: str, repo_limit: int = _RECENT_REPOS_LIMIT) -> list[dict]:
+async def get_recent_commits(
+    session_id: str, username: str, repo_limit: int = _RECENT_REPOS_LIMIT, repos: list[dict] | None = None
+) -> list[dict]:
     """Recent commits by username, across the user's most recently pushed repos.
 
     Commits are scoped per-repo in GitHub's API, so this fans out across the
-    top `repo_limit` recently-pushed repos rather than one global query.
+    top `repo_limit` recently-pushed repos rather than one global query. Pass
+    `repos` (from a prior get_recent_repos call) to avoid refetching it.
     """
+    if repos is None:
+        repos = await get_recent_repos(session_id, limit=repo_limit)
     commits: list[dict] = []
-    for repo in get_recent_repos(session_id, limit=repo_limit):
-        response = _request(
+    for repo in repos:
+        response = await _request(
             "GET",
             session_id,
             f"/repos/{repo['full_name']}/commits",
@@ -112,15 +118,20 @@ def get_recent_commits(session_id: str, username: str, repo_limit: int = _RECENT
     return commits
 
 
-def get_open_pull_requests(session_id: str, username: str, repo_limit: int = _RECENT_REPOS_LIMIT) -> list[dict]:
+async def get_open_pull_requests(
+    session_id: str, username: str, repo_limit: int = _RECENT_REPOS_LIMIT, repos: list[dict] | None = None
+) -> list[dict]:
     """Open PRs authored by username, across the user's most recently pushed repos.
 
     The PRs-list endpoint has no "author" filter, so we fetch each repo's open
-    PRs and filter by author client-side.
+    PRs and filter by author client-side. Pass `repos` (from a prior
+    get_recent_repos call) to avoid refetching it.
     """
+    if repos is None:
+        repos = await get_recent_repos(session_id, limit=repo_limit)
     pull_requests: list[dict] = []
-    for repo in get_recent_repos(session_id, limit=repo_limit):
-        response = _request(
+    for repo in repos:
+        response = await _request(
             "GET",
             session_id,
             f"/repos/{repo['full_name']}/pulls",

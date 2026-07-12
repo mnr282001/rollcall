@@ -54,11 +54,11 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 
 ## Phase 3 — Wire them together (Day 2 morning)
 
-- [ ] Build query parser: extract a name from "What is John working on?"
-- [ ] Handle multiple question phrasings (e.g. "Show me Sarah's current issues")
-- [ ] Map display name → JIRA account ID + GitHub username (small lookup dict)
-- [ ] Build response generator (start with templates)
-- [ ] Combine JIRA + GitHub data into one coherent, conversational answer
+- [x] Build query parser: extract a name from "What is John working on?"
+- [x] Handle multiple question phrasings (e.g. "Show me Sarah's current issues")
+- [x] Map display name → JIRA account ID + GitHub username (small lookup dict)
+- [x] Build response generator (start with templates)
+- [x] Combine JIRA + GitHub data into one coherent, conversational answer
 - [ ] (Stretch) Swap template for LLM API call if time allows
 
 ## Phase 4 — Interface (Day 2 afternoon)

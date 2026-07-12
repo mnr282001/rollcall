@@ -19,16 +19,17 @@ class JiraConnectionError(JiraError):
     """Raised on network failures/timeouts talking to JIRA."""
 
 
-def _do_request(method: str, access_token: str, cloud_id: str, path: str, **kwargs) -> httpx.Response:
+async def _do_request(method: str, access_token: str, cloud_id: str, path: str, **kwargs) -> httpx.Response:
     base_url = f"https://api.atlassian.com/ex/jira/{cloud_id}"
     headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
     try:
-        return httpx.request(method, f"{base_url}{path}", headers=headers, timeout=_TIMEOUT, **kwargs)
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            return await client.request(method, f"{base_url}{path}", headers=headers, **kwargs)
     except httpx.RequestError as exc:
         raise JiraConnectionError(f"Could not reach JIRA: {exc}") from exc
 
 
-def _get_valid_access_token(session_id: str, session) -> str:
+async def _get_valid_access_token(session_id: str, session) -> str:
     """Refreshes proactively if the token is expired.
 
     Jira's /search/jql silently returns an empty result set for a stale token
@@ -47,13 +48,13 @@ def _get_valid_access_token(session_id: str, session) -> str:
     return new_access_token
 
 
-def _request(method: str, session_id: str, path: str, **kwargs) -> httpx.Response:
+async def _request(method: str, session_id: str, path: str, **kwargs) -> httpx.Response:
     session = db.get_session(session_id)
     if not session or not session["jira_access_token"]:
         raise JiraAuthError("No Jira session — visit /auth/jira/login first.")
 
-    access_token = _get_valid_access_token(session_id, session)
-    response = _do_request(method, access_token, session["jira_cloud_id"], path, **kwargs)
+    access_token = await _get_valid_access_token(session_id, session)
+    response = await _do_request(method, access_token, session["jira_cloud_id"], path, **kwargs)
 
     if response.status_code in (401, 403):
         raise JiraAuthError("Jira rejected the access token even after a freshness check.")
@@ -61,16 +62,16 @@ def _request(method: str, session_id: str, path: str, **kwargs) -> httpx.Respons
     return response
 
 
-def whoami(session_id: str) -> dict:
+async def whoami(session_id: str) -> dict:
     """Sanity check: confirms the session's OAuth token works against a real JIRA endpoint."""
-    response = _request("GET", session_id, "/rest/api/3/myself")
+    response = await _request("GET", session_id, "/rest/api/3/myself")
     response.raise_for_status()
     return response.json()
 
 
-def fetch_assigned_issues_raw(session_id: str, account_id: str) -> dict:
+async def fetch_assigned_issues_raw(session_id: str, account_id: str) -> dict:
     """Raw JQL search response for issues assigned to account_id."""
-    response = _request(
+    response = await _request(
         "GET",
         session_id,
         "/rest/api/3/search/jql",
@@ -83,14 +84,14 @@ def fetch_assigned_issues_raw(session_id: str, account_id: str) -> dict:
     return response.json()
 
 
-def get_jira_issues(session_id: str, account_id: str) -> list[dict]:
+async def get_jira_issues(session_id: str, account_id: str) -> list[dict]:
     """Assigned issues for account_id, trimmed to the fields we need.
 
     "User not found" is an application-level concern (Phase 3's name -> accountId
     lookup dict), not something we ask Jira to verify here. An unknown or inactive
     account_id simply yields an empty list, same as a known account with no work.
     """
-    raw = fetch_assigned_issues_raw(session_id, account_id)
+    raw = await fetch_assigned_issues_raw(session_id, account_id)
     return [
         {
             "key": issue["key"],

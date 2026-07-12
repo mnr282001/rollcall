@@ -42,7 +42,7 @@ async def debug_jira_issues(request: Request, account_id: str = "61e9d1c998cd610
         raise HTTPException(status_code=401, detail="Jira not connected — visit /auth/jira/login first")
 
     try:
-        issues = jira_client.get_jira_issues(session_id, account_id)
+        issues = await jira_client.get_jira_issues(session_id, account_id)
     except jira_client.JiraAuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
@@ -62,9 +62,9 @@ async def debug_github_activity(request: Request, username: str = "mnr282001"):
         raise HTTPException(status_code=401, detail="GitHub not connected — visit /auth/github/login first")
 
     try:
-        repos = github_client.get_recent_repos(session_id)
-        commits = github_client.get_recent_commits(session_id, username)
-        pull_requests = github_client.get_open_pull_requests(session_id, username)
+        repos = await github_client.get_recent_repos(session_id)
+        commits = await github_client.get_recent_commits(session_id, username)
+        pull_requests = await github_client.get_open_pull_requests(session_id, username)
     except github_client.GitHubAuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except github_client.GitHubConnectionError as exc:

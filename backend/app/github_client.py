@@ -64,15 +64,23 @@ _MEMBERS_LIMIT = 100
 
 
 async def find_user_by_name(session_id: str, name: str) -> str | None:
-    """Searches members of the session's own GitHub orgs by display name.
+    """Searches the session's own profile, then its GitHub orgs, by display name.
 
-    GitHub's org-members list only returns logins, not display names, so each
-    member needs a follow-up profile fetch — expensive for large orgs, but
-    there's no bulk "members with profile" endpoint. Only an exact display
-    name match counts; ambiguous or no matches return None rather than
-    guessing, same policy as jira_client.find_user_by_name.
+    The authenticated account itself is checked first — someone working solo,
+    or whose orgs don't happen to be shared with the app, still needs to
+    resolve to their own login. GitHub's org-members list only returns
+    logins, not display names, so each member needs a follow-up profile fetch
+    — expensive for large orgs, but there's no bulk "members with profile"
+    endpoint. Only an exact display name match counts; ambiguous or no
+    matches return None rather than guessing, same policy as
+    jira_client.find_user_by_name.
     """
     name_lower = name.strip().lower()
+
+    own_profile = await whoami(session_id)
+    if (own_profile.get("name") or "").strip().lower() == name_lower:
+        return own_profile["login"]
+
     matches: list[str] = []
 
     for org in await get_user_orgs(session_id):

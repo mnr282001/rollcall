@@ -49,8 +49,8 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 - [x] Fetch recent commits for a hardcoded username
 - [x] Fetch open pull requests
 - [x] Fetch recently contributed-to repositories
-- [ ] Extract useful fields and print them
-- [ ] **Day 1 goal:** two separate modules, each returning clean data for a known user
+- [x] Extract useful fields and print them
+- [x] **Day 1 goal:** two separate modules, each returning clean data for a known user
 
 ## Phase 3 — Wire them together (Day 2 morning)
 

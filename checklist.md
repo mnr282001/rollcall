@@ -45,7 +45,7 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 ## Phase 2 — GitHub integration, in isolation (Day 1 afternoon)
 
 - [x] Authenticate to GitHub (~~personal access token~~ → **OAuth App**, per-user) — login/callback already built in `backend/app/oauth_github.py` / `auth_routes.py`, confirmed working live
-- [ ] Make one successful API call fetching real user data (beyond the OAuth token exchange itself)
+- [x] Make one successful API call fetching real user data (beyond the OAuth token exchange itself)
 - [ ] Fetch recent commits for a hardcoded username
 - [ ] Fetch open pull requests
 - [ ] Fetch recently contributed-to repositories

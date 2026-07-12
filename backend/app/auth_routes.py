@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import secrets
 
 from fastapi import APIRouter, HTTPException, Request
@@ -12,6 +13,7 @@ router = APIRouter(prefix="/auth")
 SESSION_COOKIE = "session_id"
 GITHUB_STATE_COOKIE = "github_oauth_state"
 JIRA_STATE_COOKIE = "jira_oauth_state"
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
 
 
 @router.get("/github/login")
@@ -34,7 +36,7 @@ async def github_callback(request: Request, code: str, state: str):
     db.create_session(session_id)
     db.save_github_token(session_id, token)
 
-    response = RedirectResponse("/")
+    response = RedirectResponse(FRONTEND_URL)
     response.set_cookie(SESSION_COOKIE, session_id, httponly=True, max_age=60 * 60 * 24 * 30)
     response.delete_cookie(GITHUB_STATE_COOKIE)
     return response
@@ -61,7 +63,7 @@ async def jira_callback(request: Request, code: str, state: str):
     db.create_session(session_id)
     db.save_jira_tokens(session_id, access_token, refresh_token, cloud_id)
 
-    response = RedirectResponse("/")
+    response = RedirectResponse(FRONTEND_URL)
     response.set_cookie(SESSION_COOKIE, session_id, httponly=True, max_age=60 * 60 * 24 * 30)
     response.delete_cookie(JIRA_STATE_COOKIE)
     return response

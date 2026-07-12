@@ -94,4 +94,6 @@ async def ask(request: Request, body: AskRequest):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     resolved = list(zip((name for name, _ in found), activities))
-    return AskResponse(answer=response_generator.generate_combined_response(resolved, not_found))
+    return AskResponse(
+        answer=response_generator.generate_combined_response(resolved, not_found, question=body.question)
+    )

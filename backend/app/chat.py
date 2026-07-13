@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
@@ -47,7 +48,10 @@ _TOOL = {
             "Look up Jira issues and GitHub commits/pull requests/repos for one or more "
             "teammates by display name. Call this for any person you need facts about — "
             "including someone already discussed earlier in the conversation, if you need "
-            "fresh or more specific data to answer a follow-up."
+            "fresh or more specific data to answer a follow-up. If the question refers to a "
+            "specific time frame (e.g. 'yesterday', 'today', 'this week', 'last Monday'), pass "
+            "start_date/end_date so the results come back already restricted to that window — "
+            "don't try to eyeball timestamp filtering yourself."
         ),
         "parameters": {
             "type": "object",
@@ -56,7 +60,22 @@ _TOOL = {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Display names of the people to look up, e.g. ['Nayab', 'Sarah']",
-                }
+                },
+                "start_date": {
+                    "type": "string",
+                    "description": (
+                        "Inclusive start of the time window, as YYYY-MM-DD, computed from the "
+                        "current date against the user's local calendar. Omit if the question "
+                        "isn't about a specific time frame."
+                    ),
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": (
+                        "Inclusive end of the time window, as YYYY-MM-DD. For a single day (e.g. "
+                        "'yesterday') use the same date as start_date."
+                    ),
+                },
             },
             "required": ["names"],
         },
@@ -84,12 +103,28 @@ def _current_date(tz: ZoneInfo) -> str:
     return datetime.now(tz).date().isoformat()
 
 
-def _to_local_iso(timestamp: str, tz: ZoneInfo) -> str:
-    """Re-expresses a UTC API timestamp (GitHub always returns commit/PR dates in UTC) in the
-    user's local timezone, so its calendar day lines up with `current_date` for the LLM's
-    'today'/'this week' comparisons instead of silently being a UTC day off.
+_OFFSET_NO_COLON = re.compile(r"([+-]\d{2})(\d{2})$")
+
+
+def _parse_timestamp(timestamp: str) -> datetime:
+    """Parses ISO-8601 timestamps from both GitHub ('...Z') and Jira ('...-0500', no colon
+    in the offset — which datetime.fromisoformat rejects on Python < 3.11).
     """
-    return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(tz).isoformat()
+    normalized = timestamp.replace("Z", "+00:00")
+    normalized = _OFFSET_NO_COLON.sub(r"\1:\2", normalized)
+    return datetime.fromisoformat(normalized)
+
+
+def _to_local_iso(timestamp: str, tz: ZoneInfo) -> str:
+    """Re-expresses an API timestamp in the user's local timezone, so its calendar day lines
+    up with `current_date` for the LLM's 'today'/'this week' comparisons instead of silently
+    being a day off.
+    """
+    return _parse_timestamp(timestamp).astimezone(tz).isoformat()
+
+
+def _local_date(timestamp: str, tz: ZoneInfo) -> date:
+    return _parse_timestamp(timestamp).astimezone(tz).date()
 
 
 def _system_prompt(tz: ZoneInfo) -> dict:
@@ -135,9 +170,11 @@ def _system_prompt(tz: ZoneInfo) -> dict:
             "isn't ready for review or merge — say so if it's relevant), and "
             "`requested_reviewers` (who still needs to review it, may be empty). The current "
             f"date is {current_date}. If the question asks about a specific time frame "
-            "(e.g. 'today', 'this week'), only count items whose timestamp falls in that window "
-            "relative to the current date, and say there's no activity in that window if none "
-            "qualify. Don't claim an issue was 'completed' in that window just because `updated` "
+            "(e.g. 'today', 'yesterday', 'this week'), call the tool with start_date/end_date "
+            "covering that window (computed relative to the current date) — the returned facts "
+            "are already restricted to it, so a person's empty lists mean there's no activity "
+            "in that window, not that you should broaden the search yourself. Don't claim an "
+            "issue was 'completed' in that window just because `updated` "
             "falls in it and the status happens to be Done — say it was last touched then, unless "
             "that's genuinely the same thing you can infer. Never state that someone did or "
             "didn't do something in a time frame without checking its timestamp against the "
@@ -150,11 +187,34 @@ def _seconds_to_hours(seconds: int | None) -> float | None:
     return None if seconds is None else round(seconds / 3600, 1)
 
 
-def _activity_facts(name: str, activity_data: dict, tz: ZoneInfo) -> dict:
-    """Structured, LLM-safe summary of one person's activity — no free text for the model to embellish."""
+def _in_window(timestamp: str, tz: ZoneInfo, start: date | None, end: date | None) -> bool:
+    if start is None and end is None:
+        return True
+    local_date = _local_date(timestamp, tz)
+    return (start is None or local_date >= start) and (end is None or local_date <= end)
+
+
+def _activity_facts(
+    name: str,
+    activity_data: dict,
+    tz: ZoneInfo,
+    start: date | None = None,
+    end: date | None = None,
+) -> dict:
+    """Structured, LLM-safe summary of one person's activity — no free text for the model to
+    embellish. When `start`/`end` are given, each list is restricted to items whose own
+    timestamp falls in that window, so the model isn't asked to do date-window filtering
+    itself over a mix of in-window and out-of-window facts.
+    """
     commits = activity_data["github_commits"]
     pull_requests = activity_data["github_pull_requests"]
     repos = activity_data["github_repos"]
+    jira_issues = [i for i in activity_data["jira_issues"] if _in_window(i["updated"], tz, start, end)]
+    if commits is not None:
+        commits = [c for c in commits if _in_window(c["date"], tz, start, end)]
+    if pull_requests is not None:
+        pull_requests = [p for p in pull_requests if _in_window(p["updated_at"], tz, start, end)]
+    repos = [r for r in repos if _in_window(r["pushed_at"], tz, start, end)]
     return {
         "name": name,
         "jira_issues": [
@@ -168,9 +228,9 @@ def _activity_facts(name: str, activity_data: dict, tz: ZoneInfo) -> dict:
                 "due_date": issue.get("due_date"),
                 "issue_type": issue.get("issue_type"),
             }
-            for issue in activity_data["jira_issues"]
+            for issue in jira_issues
         ],
-        "has_linked_github": commits is not None,
+        "has_linked_github": activity_data["github_commits"] is not None,
         "github_repos": [
             {
                 "full_name": repo["full_name"],
@@ -202,9 +262,27 @@ def _activity_facts(name: str, activity_data: dict, tz: ZoneInfo) -> dict:
     }
 
 
-async def _execute_get_activity(session_id: str, names: list[str], tz: ZoneInfo) -> dict:
+def _parse_date_arg(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+async def _execute_get_activity(
+    session_id: str,
+    names: list[str],
+    tz: ZoneInfo,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
     if not names:
         return {"people": [], "not_found": []}
+
+    start = _parse_date_arg(start_date)
+    end = _parse_date_arg(end_date)
 
     try:
         resolved = list(zip(names, await asyncio.gather(*(users.resolve_user(session_id, n) for n in names))))
@@ -232,7 +310,7 @@ async def _execute_get_activity(session_id: str, names: list[str], tz: ZoneInfo)
     except (jira_client.JiraRateLimitError, github_client.GitHubRateLimitError) as exc:
         return {"error": "rate_limited", "message": str(exc)}
 
-    facts = [_activity_facts(name, data, tz) for (name, _), data in zip(found, activities)]
+    facts = [_activity_facts(name, data, tz, start, end) for (name, _), data in zip(found, activities)]
     return {"people": facts, "not_found": not_found}
 
 
@@ -311,7 +389,9 @@ async def stream_message(session_id: str, user_message: str, user_timezone: str 
 
             for tool_call in tool_calls_payload:
                 args = json.loads(tool_call["function"]["arguments"])
-                result = await _execute_get_activity(session_id, args.get("names", []), tz)
+                result = await _execute_get_activity(
+                    session_id, args.get("names", []), tz, args.get("start_date"), args.get("end_date")
+                )
                 result_content = json.dumps(result)
                 db.add_message(session_id, "tool", content=result_content, tool_call_id=tool_call["id"])
                 messages.append({"role": "tool", "tool_call_id": tool_call["id"], "content": result_content})

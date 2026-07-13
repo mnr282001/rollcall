@@ -70,7 +70,14 @@ async def chat_endpoint(request: Request, body: ChatRequest):
     except chat.NotConfiguredError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return StreamingResponse(chat.stream_message(session_id, body.message), media_type="text/plain")
+    return StreamingResponse(
+        chat.stream_message(session_id, body.message),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/chat/history")

@@ -93,6 +93,25 @@ button:disabled {
   border-bottom-left-radius: 4px;
 }
 
+.streaming-status {
+  color: #666;
+  font-style: italic;
+}
+
+.streaming-dots {
+  display: inline-block;
+  animation: streaming-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes streaming-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streaming-dots { animation: none; }
+}
+
 .message-assistant > :first-child {
   margin-top: 0;
 }

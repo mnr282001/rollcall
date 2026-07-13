@@ -92,7 +92,7 @@ function App() {
         return
       }
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
+      setMessages((prev) => [...prev, { role: 'assistant', content: '', streaming: true }])
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
@@ -107,8 +107,19 @@ function App() {
           return next
         })
       }
+      const finalChunk = decoder.decode()
+      setMessages((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        next[next.length - 1] = { ...last, content: last.content + finalChunk, streaming: false }
+        return next
+      })
     } catch {
       setError('Could not reach the backend.')
+      setMessages((prev) => {
+        const last = prev[prev.length - 1]
+        return last?.streaming && !last.content ? prev.slice(0, -1) : prev
+      })
     } finally {
       setSending(false)
     }
@@ -145,7 +156,12 @@ function App() {
           <p className="hint">Try: "What is Nayab working on these days?"</p>
         )}
         {messages.map((message, i) => (
-          <ChatMessage key={i} role={message.role} content={message.content} />
+          <ChatMessage
+            key={i}
+            role={message.role}
+            content={message.content}
+            streaming={message.streaming}
+          />
         ))}
         <div ref={messagesEndRef} />
       </div>
@@ -167,14 +183,20 @@ function App() {
   )
 }
 
-function ChatMessage({ role, content }) {
+function ChatMessage({ role, content, streaming = false }) {
   if (role === 'user') {
     return <div className={`message message-${role}`}>{content}</div>
   }
 
   return (
     <div className={`message message-${role}`}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      {content ? (
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      ) : streaming ? (
+        <span className="streaming-status" role="status">
+          Looking up activity<span className="streaming-dots" aria-hidden="true">…</span>
+        </span>
+      ) : null}
     </div>
   )
 }

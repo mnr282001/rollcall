@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 
@@ -22,6 +23,42 @@ class GitHubConnectionError(GitHubError):
     """Raised on network failures/timeouts talking to GitHub."""
 
 
+class GitHubRateLimitError(GitHubError):
+    """Raised when GitHub's rate limit is still exhausted after retrying with backoff."""
+
+
+_MAX_RATE_LIMIT_RETRIES = 3
+_BACKOFF_BASE_SECONDS = 1.0
+
+
+def _is_rate_limited(response: httpx.Response) -> bool:
+    """GitHub uses 403 for both bad tokens and exhausted rate limits — the
+
+    X-RateLimit-Remaining header is what actually distinguishes them. Secondary
+    (abuse-detection) limits show up as 403 or 429, both without that header
+    necessarily being present, so 429 alone is also treated as a rate limit.
+    """
+    if response.status_code == 429:
+        return True
+    return response.status_code == 403 and response.headers.get("X-RateLimit-Remaining") == "0"
+
+
+def _rate_limit_wait_seconds(response: httpx.Response, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            return float(retry_after)
+        except ValueError:
+            pass
+    reset_at = response.headers.get("X-RateLimit-Reset")
+    if reset_at is not None:
+        try:
+            return max(0.0, float(reset_at) - time.time())
+        except ValueError:
+            pass
+    return _BACKOFF_BASE_SECONDS * (2**attempt)
+
+
 async def _do_request(method: str, token: str, path: str, **kwargs) -> httpx.Response:
     headers = {
         "Authorization": f"Bearer {token}",
@@ -40,7 +77,16 @@ async def _request(method: str, session_id: str, path: str, **kwargs) -> httpx.R
     if not session or not session["github_token"]:
         raise GitHubAuthError("No GitHub session — visit /auth/github/login first.")
 
-    response = await _do_request(method, session["github_token"], path, **kwargs)
+    for attempt in range(_MAX_RATE_LIMIT_RETRIES + 1):
+        response = await _do_request(method, session["github_token"], path, **kwargs)
+
+        if _is_rate_limited(response):
+            if attempt == _MAX_RATE_LIMIT_RETRIES:
+                raise GitHubRateLimitError("GitHub rate limit exceeded — try again shortly.")
+            await asyncio.sleep(_rate_limit_wait_seconds(response, attempt))
+            continue
+
+        break
 
     if response.status_code in (401, 403):
         raise GitHubAuthError("GitHub rejected the access token.")

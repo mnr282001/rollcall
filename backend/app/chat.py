@@ -117,7 +117,10 @@ def _system_prompt(tz: ZoneInfo) -> dict:
             "guessing about their code activity. If a tool result has an `error` field "
             "(`auth_expired` or `connection`), explain the problem conversationally and suggest "
             "reconnecting Jira/GitHub in the app rather than treating it as fatal — still answer "
-            "about anyone else in the same request if possible. JIRA issues have an `updated` "
+            "about anyone else in the same request if possible. If the `error` field is "
+            "`rate_limited`, say Jira/GitHub is temporarily rate-limiting requests and to try "
+            "again in a bit — don't suggest reconnecting, since the account itself is fine. "
+            "JIRA issues have an `updated` "
             "timestamp (when the ticket was last modified in any way — not necessarily when it "
             "was completed), a `priority` (may be null if unset), an `estimate_hours` (original "
             "time estimate in hours, may be null if not set), a `due_date` (may be null), and an "
@@ -209,6 +212,8 @@ async def _execute_get_activity(session_id: str, names: list[str], tz: ZoneInfo)
         return {"error": "auth_expired", "message": str(exc)}
     except (jira_client.JiraConnectionError, github_client.GitHubConnectionError) as exc:
         return {"error": "connection", "message": str(exc)}
+    except (jira_client.JiraRateLimitError, github_client.GitHubRateLimitError) as exc:
+        return {"error": "rate_limited", "message": str(exc)}
 
     not_found = [name for name, user in resolved if user is None]
     found = [(name, user) for name, user in resolved if user is not None]
@@ -224,6 +229,8 @@ async def _execute_get_activity(session_id: str, names: list[str], tz: ZoneInfo)
         return {"error": "auth_expired", "message": str(exc)}
     except (jira_client.JiraConnectionError, github_client.GitHubConnectionError) as exc:
         return {"error": "connection", "message": str(exc)}
+    except (jira_client.JiraRateLimitError, github_client.GitHubRateLimitError) as exc:
+        return {"error": "rate_limited", "message": str(exc)}
 
     facts = [_activity_facts(name, data, tz) for (name, _), data in zip(found, activities)]
     return {"people": facts, "not_found": not_found}

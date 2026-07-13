@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 
 from app import db, oauth_jira
@@ -17,6 +19,24 @@ class JiraAuthError(JiraError):
 
 class JiraConnectionError(JiraError):
     """Raised on network failures/timeouts talking to JIRA."""
+
+
+class JiraRateLimitError(JiraError):
+    """Raised when Jira's rate limit is still exhausted after retrying with backoff."""
+
+
+_MAX_RATE_LIMIT_RETRIES = 3
+_BACKOFF_BASE_SECONDS = 1.0
+
+
+def _rate_limit_wait_seconds(response: httpx.Response, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            return float(retry_after)
+        except ValueError:
+            pass
+    return _BACKOFF_BASE_SECONDS * (2**attempt)
 
 
 async def _do_request(method: str, access_token: str, cloud_id: str, path: str, **kwargs) -> httpx.Response:
@@ -54,7 +74,17 @@ async def _request(method: str, session_id: str, path: str, **kwargs) -> httpx.R
         raise JiraAuthError("No Jira session — visit /auth/jira/login first.")
 
     access_token = await _get_valid_access_token(session_id, session)
-    response = await _do_request(method, access_token, session["jira_cloud_id"], path, **kwargs)
+
+    for attempt in range(_MAX_RATE_LIMIT_RETRIES + 1):
+        response = await _do_request(method, access_token, session["jira_cloud_id"], path, **kwargs)
+
+        if response.status_code == 429:
+            if attempt == _MAX_RATE_LIMIT_RETRIES:
+                raise JiraRateLimitError("Jira rate limit exceeded — try again shortly.")
+            await asyncio.sleep(_rate_limit_wait_seconds(response, attempt))
+            continue
+
+        break
 
     if response.status_code in (401, 403):
         raise JiraAuthError("Jira rejected the access token even after a freshness check.")

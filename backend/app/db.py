@@ -55,27 +55,6 @@ def clear_jira_tokens(session_id: str) -> None:
     ).eq("session_id", session_id).execute()
 
 
-def get_any_session_id() -> str | None:
-    """Used only by cli.py, which has no cookie to read a session_id from.
-
-    Prefers a session with both tokens present — cli.py needs both Jira and
-    GitHub to answer anything, and picking an incomplete session at random
-    would fail every query.
-    """
-    result = (
-        _get_client()
-        .table("sessions")
-        .select("session_id")
-        .not_.is_("jira_access_token", "null")
-        .not_.is_("github_token", "null")
-        .limit(1)
-        .execute()
-    )
-    if result.data:
-        return result.data[0]["session_id"]
-
-    result = _get_client().table("sessions").select("session_id").limit(1).execute()
-    return result.data[0]["session_id"] if result.data else None
 
 
 def get_session(session_id: str) -> dict | None:

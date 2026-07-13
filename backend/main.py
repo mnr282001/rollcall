@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,6 +57,11 @@ class ChatRequest(BaseModel):
     message: str
 
 
+async def _sse_message_stream(session_id: str, message: str) -> AsyncIterator[str]:
+    async for chunk in chat.stream_message(session_id, message):
+        yield f"data: {json.dumps(chunk)}\n\n"
+
+
 def _require_session(request: Request) -> str:
     session_id = request.cookies.get(SESSION_COOKIE)
     if not session_id or not db.get_session(session_id):
@@ -71,8 +78,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return StreamingResponse(
-        chat.stream_message(session_id, body.message),
-        media_type="text/plain",
+        _sse_message_stream(session_id, body.message),
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-store, no-transform",
             "X-Accel-Buffering": "no",

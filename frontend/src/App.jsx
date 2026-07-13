@@ -100,22 +100,38 @@ function App() {
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value, { stream: true })
+      let eventBuffer = ''
+
+      function appendEvents(text) {
+        eventBuffer += text
+        const events = eventBuffer.split('\n\n')
+        eventBuffer = events.pop() ?? ''
+
+        const content = events
+          .map((event) => event.split('\n').find((line) => line.startsWith('data: ')))
+          .filter(Boolean)
+          .map((line) => JSON.parse(line.slice(6)))
+          .join('')
+
+        if (!content) return
         setMessages((prev) => {
           const next = [...prev]
           const last = next[next.length - 1]
-          next[next.length - 1] = { ...last, content: last.content + chunk }
+          next[next.length - 1] = { ...last, content: last.content + content }
           return next
         })
       }
-      const finalChunk = decoder.decode()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        appendEvents(decoder.decode(value, { stream: true }))
+      }
+      appendEvents(`${decoder.decode()}\n\n`)
       setMessages((prev) => {
         const next = [...prev]
         const last = next[next.length - 1]
-        next[next.length - 1] = { ...last, content: last.content + finalChunk, streaming: false }
+        next[next.length - 1] = { ...last, streaming: false }
         return next
       })
     } catch {

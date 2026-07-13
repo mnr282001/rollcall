@@ -5,11 +5,15 @@ import json
 import os
 import secrets
 import time
+from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
+# Keep deployed values in .env, while allowing git-ignored local development
+# settings to override them without changing production configuration.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env.local", override=True)
 
 JIRA_OAUTH_CLIENT_ID = os.environ["JIRA_OAUTH_CLIENT_ID"]
 JIRA_OAUTH_CLIENT_SECRET = os.environ["JIRA_OAUTH_CLIENT_SECRET"]

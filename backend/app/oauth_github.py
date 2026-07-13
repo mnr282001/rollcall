@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import os
 import secrets
+from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
+# Keep deployed values in .env, while allowing git-ignored local development
+# settings to override them without changing production configuration.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env.local", override=True)
 
 GITHUB_CLIENT_ID = os.environ["GITHUB_CLIENT_ID"]
 GITHUB_CLIENT_SECRET = os.environ["GITHUB_CLIENT_SECRET"]

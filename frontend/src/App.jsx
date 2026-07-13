@@ -70,7 +70,11 @@ function App() {
     const message = input.trim()
     if (!message || sending) return
 
-    setMessages((prev) => [...prev, { role: 'user', content: message }])
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content: message },
+      { role: 'assistant', content: '', streaming: true },
+    ])
     setInput('')
     setSending(true)
     setError('')
@@ -85,14 +89,14 @@ function App() {
 
       if (response.status === 401) {
         setError('Not logged in. Log in with Jira and GitHub first, then try again.')
+        setMessages((prev) => prev.slice(0, -1))
         return
       }
       if (!response.ok || !response.body) {
         setError(`Request failed (${response.status}).`)
+        setMessages((prev) => prev.slice(0, -1))
         return
       }
-
-      setMessages((prev) => [...prev, { role: 'assistant', content: '', streaming: true }])
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()

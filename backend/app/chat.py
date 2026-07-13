@@ -124,7 +124,11 @@ def _system_prompt(tz: ZoneInfo) -> dict:
             "`issue_type` (e.g. Bug, Story, Task). Mention priority, estimate, or due date when "
             "the question is about workload, urgency, or deadlines — call out anything overdue "
             "(due_date before the current date and not Done) — but don't force them into every "
-            f"answer. Commits have a `date`. PRs have an `updated_at`, a `draft` flag (a draft PR "
+            "answer. For questions about which repos someone has recently worked on, use the "
+            "`github_repos` list (each with `full_name`, `pushed_at`, `private`) rather than "
+            "inferring repos from `github_commits` — commits are filtered to that person's "
+            "authored commits per repo and can under-count repos they pushed to. "
+            f"Commits have a `date`. PRs have an `updated_at`, a `draft` flag (a draft PR "
             "isn't ready for review or merge — say so if it's relevant), and "
             "`requested_reviewers` (who still needs to review it, may be empty). The current "
             f"date is {current_date}. If the question asks about a specific time frame "
@@ -147,6 +151,7 @@ def _activity_facts(name: str, activity_data: dict, tz: ZoneInfo) -> dict:
     """Structured, LLM-safe summary of one person's activity — no free text for the model to embellish."""
     commits = activity_data["github_commits"]
     pull_requests = activity_data["github_pull_requests"]
+    repos = activity_data["github_repos"]
     return {
         "name": name,
         "jira_issues": [
@@ -163,6 +168,14 @@ def _activity_facts(name: str, activity_data: dict, tz: ZoneInfo) -> dict:
             for issue in activity_data["jira_issues"]
         ],
         "has_linked_github": commits is not None,
+        "github_repos": [
+            {
+                "full_name": repo["full_name"],
+                "pushed_at": _to_local_iso(repo["pushed_at"], tz),
+                "private": repo["private"],
+            }
+            for repo in repos
+        ],
         "github_commits": None if commits is None else [
             {
                 "repo": commit["repo"],

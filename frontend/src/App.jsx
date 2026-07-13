@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const STATUS_TEXT = 'Looking up activity'
 
 function App() {
   const [messages, setMessages] = useState([])
@@ -216,7 +217,18 @@ function ChatMessage({ role, content, streaming = false }) {
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
       ) : streaming ? (
         <span className="streaming-status" role="status">
-          Looking up activity<span className="streaming-dots" aria-hidden="true">…</span>
+          <span className="echo-text" aria-label="Looking up activity">
+            {STATUS_TEXT.split('').map((char, i) => (
+              <span
+                key={i}
+                className="bloom-letter"
+                style={{ animationDelay: `${i * 0.045}s` }}
+              >
+                {char === ' ' ? ' ' : char}
+              </span>
+            ))}
+          </span>
+          <span className="streaming-dots" aria-hidden="true">…</span>
         </span>
       ) : null}
     </div>

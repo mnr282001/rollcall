@@ -162,6 +162,36 @@ button:disabled {
   font-family: var(--mono);
   font-size: 0.85rem;
   color: var(--ink-soft);
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.echo-text {
+  display: inline-block;
+  white-space: pre;
+}
+
+.bloom-letter {
+  display: inline-block;
+  color: var(--ink-soft);
+  transform-origin: center;
+  animation: text-bloom 1.6s ease-in-out infinite;
+}
+
+@keyframes text-bloom {
+  0%, 40%, 100% {
+    color: var(--ink-soft);
+    transform: scale(1);
+    text-shadow: 0 0 0 transparent;
+  }
+  15% {
+    color: var(--brass);
+    transform: scale(1.35);
+    text-shadow:
+      0 0 4px var(--brass-bg),
+      0 0 10px var(--brass-bg),
+      0 0 18px var(--brass-bg);
+  }
 }
 
 .streaming-dots {
@@ -176,6 +206,7 @@ button:disabled {
 
 @media (prefers-reduced-motion: reduce) {
   .streaming-dots { animation: none; }
+  .bloom-letter { animation: none; }
 }
 
 .message-assistant > :first-child {

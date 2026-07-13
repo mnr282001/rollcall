@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://rollcall-backend-m9hv.onrender.com/:path*" }
+  ]
+}

@@ -5,6 +5,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, OpenAIError
@@ -63,8 +64,24 @@ _TOOL = {
 }
 
 
-def _system_prompt() -> dict:
-    current_date = datetime.now(timezone.utc).date().isoformat()
+def _current_date(user_timezone: str | None) -> str:
+    """Today's date in the user's local timezone, falling back to UTC if unset/invalid.
+
+    Commit/PR/issue timestamps land on the calendar day they happened for the
+    user, not for the server — using UTC unconditionally made "today" roll
+    over hours early or late for anyone outside UTC, so activity got reported
+    against a date that hadn't occurred yet in the user's own timezone.
+    """
+    if user_timezone:
+        try:
+            return datetime.now(ZoneInfo(user_timezone)).date().isoformat()
+        except ZoneInfoNotFoundError:
+            pass
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _system_prompt(user_timezone: str | None) -> dict:
+    current_date = _current_date(user_timezone)
     return {
         "role": "system",
         "content": (
@@ -98,7 +115,7 @@ def _system_prompt() -> dict:
             f"answer. Commits have a `date`. PRs have an `updated_at`, a `draft` flag (a draft PR "
             "isn't ready for review or merge — say so if it's relevant), and "
             "`requested_reviewers` (who still needs to review it, may be empty). The current "
-            f"date (UTC) is {current_date}. If the question asks about a specific time frame "
+            f"date is {current_date}. If the question asks about a specific time frame "
             "(e.g. 'today', 'this week'), only count items whose timestamp falls in that window "
             "relative to the current date, and say there's no activity in that window if none "
             "qualify. Don't claim an issue was 'completed' in that window just because `updated` "
@@ -193,7 +210,7 @@ def _row_to_openai_message(row: dict) -> dict:
 _FALLBACK_ANSWER = "Sorry, I'm having trouble putting together an answer right now — try rephrasing?"
 
 
-async def stream_message(session_id: str, user_message: str) -> AsyncIterator[str]:
+async def stream_message(session_id: str, user_message: str, user_timezone: str | None = None) -> AsyncIterator[str]:
     """Answers a chat message, streaming the reply text as it's generated.
 
     The LLM decides which people (if any) to look up via the get_activity_for_people
@@ -201,11 +218,14 @@ async def stream_message(session_id: str, user_message: str) -> AsyncIterator[st
     assistant, and tool) is persisted so the next call picks up the full thread. Only
     the final hop (no tool call) produces content, so that's the only one streamed to
     the caller — earlier hops that just decide to call the tool emit nothing.
+
+    `user_timezone` (an IANA name like "America/Los_Angeles") anchors "today" to the
+    user's own calendar day rather than the server's — see _current_date.
     """
     client = _get_client()
     db.add_message(session_id, "user", content=user_message)
 
-    messages = [_system_prompt()] + [_row_to_openai_message(row) for row in db.get_messages(session_id)]
+    messages = [_system_prompt(user_timezone)] + [_row_to_openai_message(row) for row in db.get_messages(session_id)]
 
     try:
         for _ in range(_MAX_HOPS):

@@ -85,7 +85,7 @@ function App() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
       })
 
       if (response.status === 401) {

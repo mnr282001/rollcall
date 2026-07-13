@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,10 +55,11 @@ async def add_user(request: Request, body: AddUserRequest):
 
 class ChatRequest(BaseModel):
     message: str
+    timezone: Optional[str] = None
 
 
-async def _sse_message_stream(session_id: str, message: str) -> AsyncIterator[str]:
-    async for chunk in chat.stream_message(session_id, message):
+async def _sse_message_stream(session_id: str, message: str, user_timezone: str | None) -> AsyncIterator[str]:
+    async for chunk in chat.stream_message(session_id, message, user_timezone):
         yield f"data: {json.dumps(chunk)}\n\n"
 
 
@@ -78,7 +79,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return StreamingResponse(
-        _sse_message_stream(session_id, body.message),
+        _sse_message_stream(session_id, body.message, body.timezone),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-store, no-transform",

@@ -148,27 +148,29 @@ function App() {
   return (
     <main className="app">
       <div className="header-row">
-        <h1>Rollcall</h1>
-        {messages.length > 0 && (
-          <button type="button" className="reset-button" onClick={resetChat}>
-            Reset chat
-          </button>
-        )}
-      </div>
-
-      <div className="connections">
-        <ConnectionStatus
-          label="GitHub"
-          connected={status?.github_connected}
-          href={`${API_URL}/auth/github/login`}
-          onDisconnect={() => disconnect('github')}
-        />
-        <ConnectionStatus
-          label="Jira"
-          connected={status?.jira_connected}
-          href={`${API_URL}/auth/jira/login`}
-          onDisconnect={() => disconnect('jira')}
-        />
+        <div className="brand">
+          <span className="eyebrow">Activity roll call</span>
+          <h1>Rollcall</h1>
+        </div>
+        <div className="connections">
+          <ConnectionStatus
+            label="GitHub"
+            connected={status?.github_connected}
+            href={`${API_URL}/auth/github/login`}
+            onDisconnect={() => disconnect('github')}
+          />
+          <ConnectionStatus
+            label="Jira"
+            connected={status?.jira_connected}
+            href={`${API_URL}/auth/jira/login`}
+            onDisconnect={() => disconnect('jira')}
+          />
+          {messages.length > 0 && (
+            <button type="button" className="reset-button" onClick={resetChat}>
+              Reset
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="chat-messages">

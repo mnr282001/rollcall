@@ -64,24 +64,36 @@ _TOOL = {
 }
 
 
-def _current_date(user_timezone: str | None) -> str:
-    """Today's date in the user's local timezone, falling back to UTC if unset/invalid.
+def _resolve_timezone(user_timezone: str | None) -> ZoneInfo:
+    if user_timezone:
+        try:
+            return ZoneInfo(user_timezone)
+        except ZoneInfoNotFoundError:
+            pass
+    return ZoneInfo("UTC")
+
+
+def _current_date(tz: ZoneInfo) -> str:
+    """Today's date in the user's local timezone.
 
     Commit/PR/issue timestamps land on the calendar day they happened for the
     user, not for the server — using UTC unconditionally made "today" roll
     over hours early or late for anyone outside UTC, so activity got reported
     against a date that hadn't occurred yet in the user's own timezone.
     """
-    if user_timezone:
-        try:
-            return datetime.now(ZoneInfo(user_timezone)).date().isoformat()
-        except ZoneInfoNotFoundError:
-            pass
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(tz).date().isoformat()
 
 
-def _system_prompt(user_timezone: str | None) -> dict:
-    current_date = _current_date(user_timezone)
+def _to_local_iso(timestamp: str, tz: ZoneInfo) -> str:
+    """Re-expresses a UTC API timestamp (GitHub always returns commit/PR dates in UTC) in the
+    user's local timezone, so its calendar day lines up with `current_date` for the LLM's
+    'today'/'this week' comparisons instead of silently being a UTC day off.
+    """
+    return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(tz).isoformat()
+
+
+def _system_prompt(tz: ZoneInfo) -> dict:
+    current_date = _current_date(tz)
     return {
         "role": "system",
         "content": (
@@ -131,7 +143,7 @@ def _seconds_to_hours(seconds: int | None) -> float | None:
     return None if seconds is None else round(seconds / 3600, 1)
 
 
-def _activity_facts(name: str, activity_data: dict) -> dict:
+def _activity_facts(name: str, activity_data: dict, tz: ZoneInfo) -> dict:
     """Structured, LLM-safe summary of one person's activity — no free text for the model to embellish."""
     commits = activity_data["github_commits"]
     pull_requests = activity_data["github_pull_requests"]
@@ -152,7 +164,12 @@ def _activity_facts(name: str, activity_data: dict) -> dict:
         ],
         "has_linked_github": commits is not None,
         "github_commits": None if commits is None else [
-            {"repo": commit["repo"], "message": commit["message"], "sha": commit["sha"], "date": commit["date"]}
+            {
+                "repo": commit["repo"],
+                "message": commit["message"],
+                "sha": commit["sha"],
+                "date": _to_local_iso(commit["date"], tz),
+            }
             for commit in commits
         ],
         "github_pull_requests": None if pull_requests is None else [
@@ -160,7 +177,7 @@ def _activity_facts(name: str, activity_data: dict) -> dict:
                 "repo": pr["repo"],
                 "number": pr["number"],
                 "title": pr["title"],
-                "updated_at": pr["updated_at"],
+                "updated_at": _to_local_iso(pr["updated_at"], tz),
                 "draft": pr.get("draft"),
                 "requested_reviewers": pr.get("requested_reviewers"),
             }
@@ -169,7 +186,7 @@ def _activity_facts(name: str, activity_data: dict) -> dict:
     }
 
 
-async def _execute_get_activity(session_id: str, names: list[str]) -> dict:
+async def _execute_get_activity(session_id: str, names: list[str], tz: ZoneInfo) -> dict:
     if not names:
         return {"people": [], "not_found": []}
 
@@ -195,7 +212,7 @@ async def _execute_get_activity(session_id: str, names: list[str]) -> dict:
     except (jira_client.JiraConnectionError, github_client.GitHubConnectionError) as exc:
         return {"error": "connection", "message": str(exc)}
 
-    facts = [_activity_facts(name, data) for (name, _), data in zip(found, activities)]
+    facts = [_activity_facts(name, data, tz) for (name, _), data in zip(found, activities)]
     return {"people": facts, "not_found": not_found}
 
 
@@ -223,9 +240,10 @@ async def stream_message(session_id: str, user_message: str, user_timezone: str 
     user's own calendar day rather than the server's — see _current_date.
     """
     client = _get_client()
+    tz = _resolve_timezone(user_timezone)
     db.add_message(session_id, "user", content=user_message)
 
-    messages = [_system_prompt(user_timezone)] + [_row_to_openai_message(row) for row in db.get_messages(session_id)]
+    messages = [_system_prompt(tz)] + [_row_to_openai_message(row) for row in db.get_messages(session_id)]
 
     try:
         for _ in range(_MAX_HOPS):
@@ -273,7 +291,7 @@ async def stream_message(session_id: str, user_message: str, user_timezone: str 
 
             for tool_call in tool_calls_payload:
                 args = json.loads(tool_call["function"]["arguments"])
-                result = await _execute_get_activity(session_id, args.get("names", []))
+                result = await _execute_get_activity(session_id, args.get("names", []), tz)
                 result_content = json.dumps(result)
                 db.add_message(session_id, "tool", content=result_content, tool_call_id=tool_call["id"])
                 messages.append({"role": "tool", "tool_call_id": tool_call["id"], "content": result_content})

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
@@ -31,6 +32,20 @@ def test_resolve_timezone_invalid_name_defaults_to_utc():
 def test_to_local_iso_converts_utc_to_target_timezone():
     result = chat._to_local_iso("2026-07-01T12:00:00Z", ZoneInfo("America/Los_Angeles"))
     assert result == "2026-07-01T05:00:00-07:00"
+
+
+def test_to_local_iso_handles_jira_offset_without_colon():
+    # Jira returns offsets like "-0500" (no colon), which datetime.fromisoformat
+    # rejects outright on Python < 3.11 unless normalized first.
+    result = chat._to_local_iso("2026-07-13T12:05:33.141-0500", ZoneInfo("America/Chicago"))
+    assert result == "2026-07-13T12:05:33.141000-05:00"
+
+
+def test_local_date_uses_target_timezone_calendar_day():
+    # 11pm Pacific on the 12th is already the 13th in UTC — the local calendar
+    # day is what "yesterday"/"today" windowing must key off of.
+    result = chat._local_date("2026-07-13T06:00:00Z", ZoneInfo("America/Los_Angeles"))
+    assert result == date(2026, 7, 12)
 
 
 def test_seconds_to_hours_none_stays_none():
@@ -102,6 +117,57 @@ def test_activity_facts_no_linked_github_has_none_commits_and_prs():
     assert facts["github_repos"] == []
 
 
+def test_activity_facts_windows_to_the_requested_day_only():
+    # Regression for the "what did X do yesterday" bug: a ticket updated and
+    # commits made *today* must not leak into a query scoped to *yesterday*.
+    activity_data = {
+        "jira_issues": [
+            {"key": "TODAY-1", "status": "Done", "summary": "today", "updated": "2026-07-13T12:05:33.141-0500"},
+            {"key": "YEST-1", "status": "To Do", "summary": "yesterday", "updated": "2026-07-12T13:09:22.405-0500"},
+        ],
+        "github_commits": [
+            {"repo": "r", "message": "today commit", "sha": "aaa", "date": "2026-07-13T18:34:35Z"},
+            {"repo": "r", "message": "old commit", "sha": "bbb", "date": "2026-07-09T05:34:22Z"},
+        ],
+        "github_pull_requests": [
+            {"repo": "r", "number": 1, "title": "today PR", "updated_at": "2026-07-13T18:00:00Z"},
+        ],
+        "github_repos": [
+            {"full_name": "r", "pushed_at": "2026-07-13T18:34:38Z", "private": False},
+        ],
+    }
+    yesterday = date(2026, 7, 12)
+
+    facts = chat._activity_facts("Nayab", activity_data, ZoneInfo("America/Chicago"), yesterday, yesterday)
+
+    assert [i["key"] for i in facts["jira_issues"]] == ["YEST-1"]
+    assert facts["github_commits"] == []
+    assert facts["github_pull_requests"] == []
+    assert facts["github_repos"] == []
+    assert facts["has_linked_github"] is True  # linked status ignores the window
+
+
+def test_activity_facts_no_window_returns_everything():
+    activity_data = {
+        "jira_issues": [{"key": "AB-1", "status": "Done", "summary": "x", "updated": "2026-07-01T00:00:00Z"}],
+        "github_commits": [{"repo": "r", "message": "m", "sha": "abc", "date": "2026-01-01T00:00:00Z"}],
+        "github_pull_requests": [],
+        "github_repos": [],
+    }
+
+    facts = chat._activity_facts("Nayab", activity_data, ZoneInfo("UTC"))
+
+    assert len(facts["jira_issues"]) == 1
+    assert len(facts["github_commits"]) == 1
+
+
+def test_parse_date_arg_valid_and_invalid():
+    assert chat._parse_date_arg("2026-07-12") == date(2026, 7, 12)
+    assert chat._parse_date_arg(None) is None
+    assert chat._parse_date_arg("") is None
+    assert chat._parse_date_arg("not-a-date") is None
+
+
 # --- _execute_get_activity ----------------------------------------------------
 
 
@@ -132,6 +198,33 @@ async def test_execute_get_activity_splits_found_and_not_found(monkeypatch):
 
     assert result["not_found"] == ["Ghost"]
     assert [p["name"] for p in result["people"]] == ["Nayab"]
+
+
+async def test_execute_get_activity_applies_start_and_end_date(monkeypatch):
+    monkeypatch.setattr(
+        users, "resolve_user", AsyncMock(return_value={"jira_account_id": "acc-1", "github_username": "nayab"})
+    )
+    monkeypatch.setattr(
+        activity,
+        "get_user_activity",
+        AsyncMock(
+            return_value={
+                "jira_issues": [
+                    {"key": "TODAY-1", "status": "Done", "summary": "s", "updated": "2026-07-13T00:00:00Z"},
+                    {"key": "YEST-1", "status": "To Do", "summary": "s", "updated": "2026-07-12T00:00:00Z"},
+                ],
+                "github_commits": [],
+                "github_pull_requests": [],
+                "github_repos": [],
+            }
+        ),
+    )
+
+    result = await chat._execute_get_activity(
+        _SESSION_ID, ["Nayab"], ZoneInfo("UTC"), start_date="2026-07-12", end_date="2026-07-12"
+    )
+
+    assert [i["key"] for i in result["people"][0]["jira_issues"]] == ["YEST-1"]
 
 
 @pytest.mark.parametrize(
@@ -246,6 +339,23 @@ async def test_stream_message_calls_tool_then_answers(monkeypatch):
     tool_message_calls = [c for c in db.add_message.call_args_list if c.args[1] == "tool"]
     assert len(tool_message_calls) == 1
     assert json.loads(tool_message_calls[0].kwargs["content"]) == {"people": [{"name": "Nayab"}], "not_found": []}
+
+
+async def test_stream_message_passes_date_window_args_to_execute(monkeypatch):
+    tool_args = json.dumps({"names": ["Nayab"], "start_date": "2026-07-12", "end_date": "2026-07-12"})
+    _install_fake_openai(
+        monkeypatch,
+        [
+            _fake_stream([_tool_call_chunk(0, "call_1", "get_activity_for_people", tool_args)]),
+            _fake_stream([_text_chunk("Nayab did X yesterday.")]),
+        ],
+    )
+    execute = AsyncMock(return_value={"people": [], "not_found": []})
+    monkeypatch.setattr(chat, "_execute_get_activity", execute)
+
+    [c async for c in chat.stream_message(_SESSION_ID, "what did nayab do yesterday?")]
+
+    execute.assert_awaited_once_with(_SESSION_ID, ["Nayab"], chat._resolve_timezone(None), "2026-07-12", "2026-07-12")
 
 
 async def test_stream_message_falls_back_on_openai_error(monkeypatch):

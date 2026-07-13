@@ -74,8 +74,9 @@ async def chat_endpoint(request: Request, body: ChatRequest):
         chat.stream_message(session_id, body.message),
         media_type="text/plain",
         headers={
-            "Cache-Control": "no-cache, no-transform",
+            "Cache-Control": "no-cache, no-store, no-transform",
             "X-Accel-Buffering": "no",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 

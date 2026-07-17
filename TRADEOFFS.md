@@ -47,12 +47,22 @@ PRs in a repo that hasn't been pushed to recently would be missed.
 ## Templates vs. LLM for response generation
 
 Started with `response_generator.py` as plain string templates: reliable, zero
-latency, zero cost, deterministic for demo/test purposes. No LLM call yet.
+latency, zero cost, deterministic for demo/test purposes.
 
-**When to flip:** once the template needs to handle more phrasings of "what does this
-data mean" than templates can reasonably cover (e.g. summarizing *why* someone's
-activity looks a certain way, or answering follow-up questions) — that's a stretch
-goal in `checklist.md` Phase 3, not yet implemented.
+**Flipped:** templates couldn't handle open-ended phrasing, multi-person follow-ups,
+or pronoun resolution across turns ("what about her PRs?"), so `response_generator.py`
+and `query_parser.py` were both replaced by `chat.py`, which uses OpenAI function-calling
+end to end. The model itself decides when it needs facts (via a single
+`get_activity_for_people` tool), resolves names/pronouns/follow-ups from conversation
+history, and composes the final answer — `_activity_facts()` still hands it a
+structured, LLM-safe fact sheet rather than free text, so the model can't invent
+tickets/commits/people beyond what a tool call actually returned. Answers stream
+token-by-token via `AsyncOpenAI(stream=True)`.
+
+**Cost:** an LLM call (and its latency/cost) is now on the critical path for every
+message, including ones that don't need a tool call. A prompt-injection surface also
+opens up in Jira/GitHub content (issue summaries, commit messages) that flows into
+the model's context — not addressed yet, see "What we'd do with another week."
 
 ## Concurrent vs. sequential fetches
 
@@ -174,10 +184,35 @@ a lot.
   `asyncio.to_thread`) — a smaller contributor than the two fixes above.
 - No caching of repo/commit/PR data across turns in the same session.
 
+## AWS (App Runner + Amplify) vs. Render + Vercel
+
+`checklist.md` originally planned App Runner (backend) + Amplify Hosting (frontend)
+as the enterprise-realistic choice for an FDE-flavored demo. Actually deployed on
+**Render (backend) + Vercel (frontend)** instead — no Dockerfile/ECR/IAM plumbing to
+build under a one-day budget, and both have a working free tier with zero infra code.
+Vercel proxies `/api/*` to the Render URL (`frontend/vercel.json`) so the deployed
+frontend and backend appear same-origin to the browser.
+
+**Cost:** Render's free tier cold-starts after inactivity — first request after idle
+is noticeably slower than the ~2.7s figure above. Fine for a demo, would need a paid
+tier or App Runner's always-on model for anything real.
+
+**Verdict:** right call for the time-box. The AWS path is still the answer if asked
+"how would this look for an actual enterprise customer" — most FDE customers are AWS
+shops, and that's worth saying out loud even though it wasn't built.
+
 ## What we'd do with another week
 
 - Real multi-user mapping (see above) instead of a single hardcoded identity
 - Caching (GitHub/JIRA rate limits are the real ceiling under concurrent/repeated
   queries)
-- LLM-based response generation for open-ended follow-up questions
-- Broader test coverage for `query_parser.py`'s phrasing patterns
+- Broader test coverage for edge cases in date/timezone window parsing
+- Prompt-injection hardening: Jira issue summaries and commit messages flow into the
+  LLM's context unsanitized as of the templates→LLM flip above — a maliciously
+  crafted commit message or ticket title could attempt to steer the model's output
+- Structured logging/tracing across the OAuth, activity-fetch, and chat hops — right
+  now a failure in production is a Render log line, not something searchable
+- CI running the test suite on push (currently local-only)
+- A `supabase/migrations/` folder — the `sessions`/`messages`/`team_members` schema
+  currently only exists in the live Supabase project, so there's no way to spin up
+  a fresh environment from this repo alone

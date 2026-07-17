@@ -5,11 +5,13 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 **Guiding principle:** build a thin end-to-end slice first (one API → one hardcoded name → a printed answer), then widen it. Don't perfect one integration before starting the other, and don't build UI before the core works.
 
 **Key decisions (settled for this build):**
-- [ ] Backend: **FastAPI** (Python) — async lets you fetch JIRA + GitHub concurrently
-- [ ] Frontend: **React** — build CLI first, then layer React on top
-- [ ] Response generation: **templates** first (reliable), LLM API as a stretch goal
-- [ ] Deploy target: **AWS App Runner (backend) + Amplify Hosting (frontend)** — see Phase 7
-- [ ] Guardrail: if AWS setup eats >~half a day, ship on a fallback and narrate the tradeoff in the demo
+- [x] Backend: **FastAPI** (Python) — async lets you fetch JIRA + GitHub concurrently
+- [x] Frontend: **React** — build CLI first, then layer React on top
+- [x] Response generation: **templates** first, then flipped to **LLM function-calling**
+      (`chat.py`) once templates couldn't handle follow-ups/pronouns — see `TRADEOFFS.md`
+- [x] Deploy target: **Render (backend) + Vercel (frontend)** — pivoted from the
+      original AWS App Runner/Amplify plan to stay inside the time-box; see `TRADEOFFS.md`
+- [x] Guardrail: if AWS setup eats >~half a day, ship on a fallback and narrate the tradeoff in the demo
 
 ---
 
@@ -59,7 +61,8 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 - [x] Map display name → JIRA account ID + GitHub username (small lookup dict)
 - [x] Build response generator (start with templates)
 - [x] Combine JIRA + GitHub data into one coherent, conversational answer
-- [ ] (Stretch) Swap template for LLM API call if time allows
+- [x] (Stretch) Swap template for LLM API call — done; templates (`response_generator.py`,
+      `query_parser.py`) fully replaced by `chat.py`'s OpenAI function-calling loop
 
 ## Phase 4 — Interface (Day 2 afternoon)
 
@@ -84,29 +87,31 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 - [ ] Prepare demo: 3 min code walkthrough / 7 min live queries / 3 min challenges / 2 min Q&A
 - [ ] Capture backup screenshots or a recording in case live APIs flake
 
-## Phase 7 — Deploy to AWS (only after the app works locally)
+## Phase 7 — Deploy (only after the app works locally)
 
-> Deploying to a real URL is the "stand out" move and enterprise-realistic for an FDE role
-> (customers are overwhelmingly AWS shops). But protect the deliverable: a working demo on a
-> fallback beats a half-finished AWS setup with nothing to show.
+> Deploying to a real URL is the "stand out" move. Originally planned as AWS App
+> Runner + Amplify (enterprise-realistic — customers are overwhelmingly AWS shops),
+> but pivoted to **Render (backend) + Vercel (frontend)** to stay inside the
+> time-box — no Dockerfile/ECR/IAM plumbing needed. See `TRADEOFFS.md` for the
+> full reasoning; the AWS path is still the right answer to cite if asked how this
+> would look for a real enterprise customer.
 
-**Backend — App Runner (persistent container, auto HTTPS, no timeout/cold-start pain):**
-- [ ] Write a `Dockerfile` for the FastAPI app (Uvicorn on the port App Runner expects, e.g. 8080)
-- [ ] Test the container locally: `docker build` + `docker run`, hit the endpoint
-- [ ] Create an ECR repository and push the image
-- [ ] Create an IAM role granting App Runner access to pull from ECR
-- [ ] Create the App Runner service pointing at the image; confirm the live URL responds
-- [ ] Set JIRA/GitHub tokens as App Runner environment variables (never bake into the image)
+**Backend — Render:**
+- [x] Deploy the FastAPI app to Render; confirm the live URL responds
+  (`rollcall-backend-m9hv.onrender.com`)
+- [x] Set JIRA/GitHub/Supabase/OpenAI secrets as Render environment variables
+  (never baked into the image)
 
-**Frontend — Amplify Hosting (Git-based, closest to a Vercel workflow):**
-- [ ] Connect the repo to Amplify Hosting; confirm the auto-build succeeds
-- [ ] Point the frontend at the App Runner backend URL (env var, not hardcoded)
-- [ ] Update backend CORS to allow the deployed frontend origin
-- [ ] (Bonus) Attach a custom domain — the real-URL signal is worth the few clicks
+**Frontend — Vercel:**
+- [x] Connect the repo to Vercel; confirm the auto-build succeeds
+- [x] Proxy `/api/*` to the Render backend (`frontend/vercel.json` rewrite) so
+  frontend and backend appear same-origin to the browser
+- [x] Update backend CORS/cookie settings (`FRONTEND_URL`, `SameSite=None; Secure`
+  once cross-site) to allow the deployed frontend origin
+- [ ] (Bonus) Attach a custom domain
 
-**Fallback guardrail:**
-- [ ] Set a hard time-box (e.g. stop AWS debugging after ~half a day)
-- [ ] If blocked, ship on a simpler host and note it in the demo as a deliberate tradeoff
+**Known cost of this path:** Render's free tier cold-starts after inactivity — see
+`TRADEOFFS.md`.
 
 ---
 
@@ -127,26 +132,37 @@ A 2-day sprint to build a chatbot that answers **"What is [member] working on th
 
 ---
 
-## Target folder structure
+## Actual folder structure
+
+(Superseded the original planned layout above — `query_parser.py`/`response_generator.py`
+were replaced by `chat.py`'s LLM function-calling, `cli.py` was dropped once the FastAPI
++ React path worked end to end, and OAuth/session-store modules were added mid-build —
+see the architecture pivot note above.)
 
 ```
-project/
+rollcall/
 ├── backend/
 │   ├── app/
-│   │   ├── jira_client.py         # JIRA API integration
-│   │   ├── github_client.py       # GitHub API integration
-│   │   ├── query_parser.py        # Extract user names from queries
-│   │   ├── response_generator.py  # Format responses
-│   │   ├── users.py               # Name → JIRA/GitHub identifier lookup
-│   │   └── main.py                # FastAPI app + /ask endpoint
-│   ├── cli.py                     # CLI loop (build/demo this first)
+│   │   ├── jira_client.py       # JIRA API integration (+ retry/backoff)
+│   │   ├── github_client.py     # GitHub API integration (+ retry/backoff)
+│   │   ├── activity.py          # Concurrent Jira+GitHub fetch for one person
+│   │   ├── chat.py              # OpenAI function-calling loop, streaming
+│   │   ├── users.py             # Name → Jira/GitHub identifier resolution + cache
+│   │   ├── db.py                # Supabase-backed sessions/messages/team_members
+│   │   ├── oauth_github.py      # GitHub OAuth App flow
+│   │   ├── oauth_jira.py        # Jira 3LO OAuth flow
+│   │   └── auth_routes.py       # Login/callback/logout/me routes
+│   ├── main.py                  # FastAPI app + /chat, /admin routes
+│   ├── tests/                   # pytest, mocked network boundaries
 │   ├── requirements.txt
-│   ├── Dockerfile                 # For App Runner
-│   └── .env                       # Secrets — never commit
-├── frontend/                      # React app (Vite)
-│   └── src/
-├── .gitignore                     # Must include .env
-└── README.md                      # Setup + deployment notes
+│   └── .env / .env.local        # Secrets — never commit
+├── frontend/                    # React app (Vite)
+│   ├── src/
+│   └── vercel.json              # Proxies /api/* to the Render backend
+├── TRADEOFFS.md                 # Design decisions and what we'd change
+├── TESTING.md                   # How the test suites are organized
+├── .gitignore                   # Must include .env
+└── README.md                    # Setup + deployment notes
 ```
 
 ## Evaluation weighting (keep these in view)
